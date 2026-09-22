@@ -1,0 +1,18 @@
+[package]
+name = "chess-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+ts = ["dep:ts-rs"]
+
+[dependencies]
+shakmaty.workspace = true
+pgn-reader.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+ts-rs = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true

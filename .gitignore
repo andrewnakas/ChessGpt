@@ -1,0 +1,8 @@
+/target
+/engines/*
+!/engines/.gitkeep
+/data
+.env
+node_modules
+/web/build
+/web/.svelte-kit

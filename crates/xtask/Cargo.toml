@@ -6,3 +6,6 @@ license.workspace = true
 publish = false
 
 [dependencies]
+api-types.workspace = true
+sha2 = "0.10"
+anyhow.workspace = true

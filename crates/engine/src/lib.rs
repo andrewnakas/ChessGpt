@@ -22,14 +22,19 @@ pub fn find_stockfish(root: &std::path::Path) -> Option<std::path::PathBuf> {
             return Some(p);
         }
     }
-    let exe = if cfg!(windows) { "stockfish-windows-x86-64-universal.exe" } else { "stockfish" };
-    for cand in [
-        root.join("engines").join("stockfish").join(exe),
-        root.join("engines").join(exe),
-        root.join("engines").join("stockfish").join("stockfish"),
-    ] {
-        if cand.exists() {
-            return Some(cand);
+    let names: &[&str] = if cfg!(windows) {
+        &["stockfish-windows-x86-64-universal.exe", "stockfish.exe"]
+    } else if cfg!(target_arch = "aarch64") {
+        &["stockfish-linux-arm64-universal", "stockfish-macos-universal", "stockfish"]
+    } else {
+        &["stockfish-linux-x86-64-universal", "stockfish-macos-universal", "stockfish"]
+    };
+    for dir in [root.join("engines").join("stockfish"), root.join("engines")] {
+        for n in names {
+            let cand = dir.join(n);
+            if cand.is_file() {
+                return Some(cand);
+            }
         }
     }
     let name = if cfg!(windows) { "stockfish.exe" } else { "stockfish" };

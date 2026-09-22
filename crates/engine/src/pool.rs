@@ -44,7 +44,7 @@ impl EngineConfig {
 /// Persistent analysis cache, implemented by the db crate.
 #[async_trait::async_trait]
 pub trait AnalysisStore: Send + Sync {
-    async fn get(&self, fen_key: &str, multipv: u32, min_depth: u32) -> Option<Analysis>;
+    async fn get(&self, engine: &str, fen_key: &str, multipv: u32, min_depth: u32) -> Option<Analysis>;
     async fn put(&self, fen_key: &str, analysis: &Analysis);
 }
 
@@ -195,7 +195,7 @@ impl EnginePool {
         }
         let min_depth = req.limit.depth?;
         let store = self.inner.store.as_ref()?;
-        let a = store.get(&key, wanted_multipv, min_depth).await?;
+        let a = store.get(&self.inner.engine_name, &key, wanted_multipv, min_depth).await?;
         self.inner
             .cache
             .lock()

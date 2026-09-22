@@ -5,3 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+chess-core = { workspace = true, features = ["ts"] }
+engine = { workspace = true, features = ["ts"] }
+serde.workspace = true
+serde_json.workspace = true
+ts-rs.workspace = true

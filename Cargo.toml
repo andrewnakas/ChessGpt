@@ -12,7 +12,7 @@ rust-version = "1.98"
 [workspace.dependencies]
 shakmaty = "0.30"
 pgn-reader = "0.29"
-shakmaty-uci = "0.2"
+
 tokio = { version = "1.53", features = ["full"] }
 tokio-util = "0.7"
 tokio-stream = { version = "0.1", features = ["sync"] }

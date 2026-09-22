@@ -22,12 +22,20 @@ async fn settings_roundtrip() {
     let s = db.settings().await.unwrap();
     assert_eq!(s.elo, 1500);
     let s = db
-        .put_settings(&Settings { elo: 1850, lichess_username: Some(" Morph ".into()), chesscom_username: None, explorer_enabled: false })
+        .put_settings(&SettingsInput { elo: 1850, lichess_username: Some(" Morph ".into()), chesscom_username: None, explorer_enabled: false, lichess_token: Some("lip_secret".into()) })
         .await
         .unwrap();
     assert_eq!(s.elo, 1850);
+    assert!(s.has_lichess_token);
     assert_eq!(s.lichess_username.as_deref(), Some("Morph"));
+    assert_eq!(db.lichess_token().await.unwrap().as_deref(), Some("lip_secret"));
+    let s = db
+        .put_settings(&SettingsInput { elo: 1850, lichess_username: None, chesscom_username: None, explorer_enabled: false, lichess_token: None })
+        .await
+        .unwrap();
+    assert!(s.has_lichess_token, "None keeps the token");
     assert!(!s.explorer_enabled);
+    assert_eq!(s.lichess_username, None);
 }
 
 #[tokio::test]
@@ -78,7 +86,7 @@ async fn providers_encrypt_keys() {
 #[tokio::test]
 async fn games_import_is_idempotent() {
     let db = Db::open_memory().await.unwrap();
-    db.put_settings(&Settings { elo: 1500, lichess_username: Some("paul morphy".into()), chesscom_username: None, explorer_enabled: true })
+    db.put_settings(&SettingsInput { elo: 1500, lichess_username: Some("paul morphy".into()), chesscom_username: None, explorer_enabled: true, lichess_token: None })
         .await
         .unwrap();
     let s = opera(&db).await;

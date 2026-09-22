@@ -13,6 +13,7 @@ CREATE TABLE user_settings (
     lichess_username  TEXT,
     chesscom_username TEXT,
     explorer_enabled  INTEGER NOT NULL DEFAULT 1,
+    lichess_token_enc TEXT,                  -- personal API token, encrypted
     updated_at        INTEGER NOT NULL
 );
 

@@ -78,17 +78,22 @@ JSON, and a judge score of at least 90% of the teacher's.
 
        cargo run -p lab -- build-set --pgn-evals --per-band 3000 --out moments.jsonl games.pgn
 
-2. **Teacher answers.** Use a large open-weight model on a free tier
-   (OpenRouter `:free` models, Groq, Cerebras). Check that the model's license
-   and the host's terms allow training on outputs. The run is resumable, so
-   it can be spread across days of free quota:
+2. **Teacher answers.** Free API tiers are too small for this: Groq's free tier
+   caps `gpt-oss-120b` at 200k tokens a day, about 50 answers. So the teacher
+   runs on a free Kaggle GPU notebook (2x T4) instead. It's an open-weight
+   Apache-2.0 model (default `Qwen/Qwen3-32B-AWQ`) under vLLM, batched, and
+   resumable across sessions:
 
-       LAB_TEACHER_PROVIDER=openrouter LAB_TEACHER_MODEL=… LAB_TEACHER_API_KEY=… \
-       LAB_JUDGE_PROVIDER=… cargo run -p lab -- datagen --set moments.jsonl --out sft.jsonl --per-minute 15
+       cargo run -p lab -- export-prompts --set moments.jsonl --out prompts.jsonl
+       python tools/train/teacher_vllm.py --prompts prompts.jsonl --out responses.jsonl   # on Kaggle
+       cargo run -p lab -- ingest --set moments.jsonl --responses responses.jsonl --out sft.jsonl
 
-   Only answers that verify on the first try, name the moment's motif and
-   grade at least 4/5 are kept (rejects go to `sft.jsonl.rejected`). The
-   messages are byte-for-byte what the student model sees at inference.
+   `ingest` runs each answer through the production checks (`coach::explain::verify_answer`).
+   It keeps only answers that verify cleanly and name the moment's motif, plus
+   pass a judge grade when `LAB_JUDGE_*` is set. Rejects go to
+   `sft.jsonl.rejected`. The kept messages are exactly what the student sees at
+   inference. `chessgpt-lab datagen` does the same through an API teacher when
+   you have quota.
 
 3. **Fine-tune.** `tools/train/finetune.py` does QLoRA with Unsloth on a free
    Kaggle notebook (2x T4) or a GTX 1080 / RTX 4050.

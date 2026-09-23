@@ -5,6 +5,8 @@
 //!   chessgpt-lab datagen --set FILE --out FILE [--limit N] [--jobs J] [--per-minute R] [--min-judge S]
 //!   chessgpt-lab eval --set FILE --out FILE [--limit N] [--jobs J] [--per-minute R]
 //!   chessgpt-lab fit-rating PGN...
+//!   chessgpt-lab export-prompts --set FILE --out FILE     (for batch generation on a GPU box)
+//!   chessgpt-lab ingest --set FILE --responses FILE --out FILE [--min-judge S]
 //!   chessgpt-lab baseline --out FILE [--per-band N] PGN...   (Lichess games with [%eval])   (Lichess games with [%eval] on every move)
 //!
 //! The model under test comes from `LAB_LLM_PROVIDER` / `_MODEL` / `_BASE_URL`
@@ -118,8 +120,10 @@ async fn main() -> Result<()> {
         Some("fit-rating") => fit_rating(&args[1..]),
         Some("datagen") => datagen(&args[1..]).await,
         Some("baseline") => baseline(&args[1..]).await,
+        Some("export-prompts") => export_prompts(&args[1..]),
+        Some("ingest") => ingest(&args[1..]).await,
         _ => {
-            eprintln!("usage: chessgpt-lab <build-set|eval|fit-rating|datagen> ...  (see the source header)");
+            eprintln!("usage: chessgpt-lab <build-set|eval|fit-rating|datagen|export-prompts|ingest|baseline> ...  (see the source header)");
             std::process::exit(2);
         }
     }
@@ -143,8 +147,24 @@ async fn build_set(args: &[String]) -> Result<()> {
     let pool = EnginePool::start(EngineConfig::with_defaults(path), None).await?;
     let cancel = CancellationToken::new();
 
+    // Append as we go and resume: moments already in --out are kept and
+    // counted, and their games skipped.
     let mut per_band: BTreeMap<&str, usize> = BTreeMap::new();
-    let mut lines = vec![];
+    let mut seen_games: std::collections::HashSet<String> = Default::default();
+    let mut written = 0usize;
+    for l in std::fs::read_to_string(&out).unwrap_or_default().lines() {
+        if let Ok(v) = serde_json::from_str::<Value>(l) {
+            if let Some(b) = v["band"].as_str().and_then(|b| BANDS.iter().find(|(_, x)| *x == b)) {
+                *per_band.entry(b.1).or_default() += 1;
+            }
+            if let Some(id) = v["id"].as_str().and_then(|i| i.rsplit_once('-')) {
+                seen_games.insert(id.0.to_string());
+            }
+            written += 1;
+        }
+    }
+    use std::io::Write as _;
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&out)?;
     for f in files {
         let text = std::fs::read_to_string(&f).with_context(|| f.clone())?;
         for (gi, game) in parse_pgn_many(&text)?.into_iter().enumerate() {
@@ -156,6 +176,10 @@ async fn build_set(args: &[String]) -> Result<()> {
             let Some(elo) = game.elo(side) else { continue };
             let b = band(elo);
             if per_band.get(b).copied().unwrap_or(0) >= max_per_band {
+                continue;
+            }
+            let site = game.tag("Site").unwrap_or("game").rsplit('/').next().unwrap_or("g").to_string();
+            if seen_games.contains(&site) {
                 continue;
             }
             let moves = if pgn_evals {
@@ -188,14 +212,14 @@ async fn build_set(args: &[String]) -> Result<()> {
                     eval,
                     moment: mc,
                 };
-                lines.push(serde_json::to_string(&rec)?);
+                writeln!(file, "{}", serde_json::to_string(&rec)?)?;
+                written += 1;
                 *per_band.entry(b).or_default() += 1;
             }
-            eprintln!("{} moments {:?}", lines.len(), per_band);
+            eprintln!("{written} moments {per_band:?}");
         }
     }
-    std::fs::write(&out, lines.join("\n") + "\n")?;
-    eprintln!("wrote {} moments to {out}", lines.len());
+    eprintln!("{written} moments in {out}");
     Ok(())
 }
 
@@ -262,8 +286,9 @@ where
     let started = Instant::now();
     loop {
         match f().await {
-            Err(e) if e.to_string().contains("(429)") && started.elapsed().as_secs() < 86_400 => {
-                eprintln!("rate limited; waiting a minute");
+            // A request bigger than the whole per-minute budget can never pass: give up on it.
+            Err(e) if e.to_string().contains("(429)") && !e.to_string().contains("Request too large") && started.elapsed().as_secs() < 86_400 => {
+                eprintln!("rate limited; waiting a minute: {}", { let t = e.to_string(); t[t.len().saturating_sub(220)..].to_string() });
                 tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             }
             other => return other,
@@ -659,6 +684,145 @@ fn fit_rating(args: &[String]) -> Result<()> {
 
 // ---------------------------------------------------------------- datagen
 
+/// The distillation quality bar, shared by live generation and ingested
+/// batch answers: clean verification, names the moment's motif, and (with a
+/// judge) grades at least `min_judge` with accuracy 4+. Returns the training
+/// line: the messages the student sees at inference plus the answer.
+async fn accept(
+    r: &Record,
+    ctx: &GameContext,
+    e: &api_types::Explanation,
+    teacher: &str,
+    judge_p: Option<&dyn Provider>,
+    min_judge: f64,
+    wire: &llm::openai::OpenAiCompat,
+) -> Result<Value, String> {
+    if e.verification.status != VerificationStatus::Ok {
+        return Err(format!("verification {:?}", e.verification.status));
+    }
+    let expected = expected_motifs(r);
+    let text = format!("{} {} {}", e.headline, e.why_it_matters, e.takeaway);
+    if !expected.is_empty() && !expected.iter().any(|m| e.concept_tags.iter().any(|t| t == m.tag()) || mentions(&text, *m)) {
+        return Err("missed the motif".into());
+    }
+    let answer = json!({
+        "headline": e.headline,
+        "why_it_matters": e.why_it_matters,
+        "better_move": e.better_move,
+        "concept_tags": e.concept_tags,
+        "takeaway": e.takeaway,
+        "mentioned_moves": e.mentioned_moves,
+    });
+    let prompt = prompts::explain_moment(ctx, &r.eval, &r.moment);
+    let mut score = None;
+    if let Some(j) = judge_p {
+        let g = grade(j, r.elo, &prompt, &answer).await;
+        let ks = ["accuracy", "insight", "level", "takeaway"];
+        let v: Vec<f64> = ks.iter().filter_map(|k| g.as_ref()?.get(*k)?.as_f64()).collect();
+        if v.len() != ks.len() {
+            return Err("judge failed".into());
+        }
+        let mean = v.iter().sum::<f64>() / v.len() as f64;
+        if mean < min_judge || v[0] < 4.0 {
+            return Err(format!("judge {mean:.1}"));
+        }
+        score = Some(mean);
+    }
+    let mut req = ChatRequest::new(prompts::explain_system(ctx), vec![Message::user(prompt)]);
+    req.json_schema = Some(JsonSchema { name: "move_explanation".into(), schema: prompts::explanation_schema() });
+    let body = wire.body_with(&req, false);
+    let mut messages = body["messages"].as_array().cloned().unwrap_or_default();
+    messages.push(json!({"role": "assistant", "content": answer.to_string()}));
+    Ok(json!({
+        "id": r.id,
+        "messages": messages,
+        "meta": {"band": r.band, "elo": r.elo, "teacher": teacher, "judge": score, "prompt_version": prompts::EXPLAIN_VERSION},
+    }))
+}
+
+fn student_wire() -> llm::openai::OpenAiCompat {
+    llm::openai::OpenAiCompat::new(
+        llm::http_client(),
+        ProviderConfig { kind: ProviderKind::OpenaiCompatible, base_url: String::new(), model: "student".into(), api_key: None },
+    )
+}
+
+fn load_records(set: &str) -> Result<Vec<Record>> {
+    std::fs::read_to_string(set)
+        .with_context(|| set.to_string())?
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).map_err(Into::into))
+        .collect()
+}
+
+/// Prompts for batch generation elsewhere (tools/train/teacher_vllm.py):
+/// one line per moment with the chat messages and the JSON schema.
+fn export_prompts(args: &[String]) -> Result<()> {
+    let set = flag(args, "--set").context("--set FILE is required")?;
+    let out = flag(args, "--out").context("--out FILE is required")?;
+    let wire = student_wire();
+    let mut lines = vec![];
+    for r in load_records(&set)? {
+        let game = r.game()?;
+        let ctx = GameContext::new(&game, Some(r.user_side), r.elo, r.opening.clone());
+        let mut req = ChatRequest::new(prompts::explain_system(&ctx), vec![Message::user(prompts::explain_moment(&ctx, &r.eval, &r.moment))]);
+        req.json_schema = Some(JsonSchema { name: "move_explanation".into(), schema: prompts::explanation_schema() });
+        let body = wire.body_with(&req, false);
+        lines.push(json!({"id": r.id, "messages": body["messages"], "schema": prompts::explanation_schema()}).to_string());
+    }
+    std::fs::write(&out, lines.join("\n") + "\n")?;
+    eprintln!("wrote {} prompts to {out}", lines.len());
+    Ok(())
+}
+
+/// Verify batch-generated answers ({"id", "text", "model"} per line) with
+/// the production checks and append the accepted ones as training lines.
+async fn ingest(args: &[String]) -> Result<()> {
+    let set = flag(args, "--set").context("--set FILE is required")?;
+    let responses = flag(args, "--responses").context("--responses FILE is required")?;
+    let out = flag(args, "--out").context("--out FILE is required")?;
+    let min_judge: f64 = flag(args, "--min-judge").map(|v| v.parse()).transpose()?.unwrap_or(4.0);
+    let judge_p = provider_from_env("LAB_JUDGE")?;
+    let records: std::collections::HashMap<String, Record> = load_records(&set)?.into_iter().map(|r| (r.id.clone(), r)).collect();
+    let done: std::collections::HashSet<String> = std::fs::read_to_string(&out)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok()?["id"].as_str().map(String::from))
+        .collect();
+    let wire = student_wire();
+    use std::io::Write as _;
+    let mut ok_file = std::fs::OpenOptions::new().create(true).append(true).open(&out)?;
+    let mut bad_file = std::fs::OpenOptions::new().create(true).append(true).open(format!("{out}.rejected"))?;
+    let (mut kept, mut dropped) = (0, 0);
+    let mut why: BTreeMap<String, usize> = BTreeMap::new();
+    for l in std::fs::read_to_string(&responses)?.lines().filter(|l| !l.trim().is_empty()) {
+        let v: Value = serde_json::from_str(l)?;
+        let (Some(id), Some(text)) = (v["id"].as_str(), v["text"].as_str()) else { continue };
+        let (Some(r), false) = (records.get(id), done.contains(id)) else { continue };
+        let model = v["model"].as_str().unwrap_or("teacher");
+        let game = r.game()?;
+        let ctx = GameContext::new(&game, Some(r.user_side), r.elo, r.opening.clone());
+        let res = match coach::explain::verify_answer(&ctx, &r.eval, &r.moment, text, "batch", model) {
+            Ok(e) => accept(r, &ctx, &e, model, judge_p.as_deref(), min_judge, &wire).await,
+            Err(e) => Err(format!("bad json: {e}")),
+        };
+        match res {
+            Ok(line) => {
+                writeln!(ok_file, "{line}")?;
+                kept += 1;
+            }
+            Err(w) => {
+                writeln!(bad_file, "{}", json!({"id": id, "why": w}))?;
+                *why.entry(w.split(':').next().unwrap_or("").split(' ').take(2).collect::<Vec<_>>().join(" ")).or_default() += 1;
+                dropped += 1;
+            }
+        }
+    }
+    eprintln!("kept {kept}, rejected {dropped}: {why:?}");
+    Ok(())
+}
+
 /// Distillation data: the teacher (`LAB_TEACHER_*`) explains each moment
 /// through the production pipeline; answers that verify cleanly on the first
 /// try, name the moment's motif, and (with `LAB_JUDGE_*`) grade well become
@@ -692,10 +856,7 @@ async fn datagen(args: &[String]) -> Result<()> {
         .take(limit)
         .collect();
     eprintln!("{} moments to do ({} already done)", records.len(), done.len());
-    let wire = llm::openai::OpenAiCompat::new(
-        llm::http_client(),
-        ProviderConfig { kind: ProviderKind::OpenaiCompatible, base_url: String::new(), model: "student".into(), api_key: None },
-    );
+    let wire = student_wire();
     let gap = std::time::Duration::from_secs_f64(60.0 / per_minute.max(0.1));
     let (mut kept, mut dropped) = (0usize, 0usize);
     let mut stream = futures::stream::iter(records.iter().map(|r| {
@@ -714,52 +875,11 @@ async fn datagen(args: &[String]) -> Result<()> {
                 Ok(x) => x,
                 Err(e) => return (r, Err(format!("teacher: {e}"))),
             };
-            let e = &x.explanation;
             if x.response["texts"].as_array().is_none_or(|t| t.len() != 1) {
                 return (r, Err("needed a correction round".into()));
             }
-            if e.verification.status != VerificationStatus::Ok {
-                return (r, Err(format!("verification {:?}", e.verification.status)));
-            }
-            let expected = expected_motifs(r);
-            let text = format!("{} {} {}", e.headline, e.why_it_matters, e.takeaway);
-            if !expected.is_empty() && !expected.iter().any(|m| e.concept_tags.iter().any(|t| t == m.tag()) || mentions(&text, *m)) {
-                return (r, Err("missed the motif".into()));
-            }
-            let answer = json!({
-                "headline": e.headline,
-                "why_it_matters": e.why_it_matters,
-                "better_move": e.better_move,
-                "concept_tags": e.concept_tags,
-                "takeaway": e.takeaway,
-                "mentioned_moves": e.mentioned_moves,
-            });
-            let prompt = prompts::explain_moment(&ctx, &r.eval, &r.moment);
-            let mut score = None;
-            if let Some(j) = &judge_p {
-                let g = grade(j.as_ref(), r.elo, &prompt, &answer).await;
-                let ks = ["accuracy", "insight", "level", "takeaway"];
-                let v: Vec<f64> = ks.iter().filter_map(|k| g.as_ref()?.get(*k)?.as_f64()).collect();
-                if v.len() != ks.len() {
-                    return (r, Err("judge failed".into()));
-                }
-                let mean = v.iter().sum::<f64>() / v.len() as f64;
-                if mean < min_judge || v[0] < 4.0 {
-                    return (r, Err(format!("judge {mean:.1}")));
-                }
-                score = Some(mean);
-            }
-            let mut req = ChatRequest::new(prompts::explain_system(&ctx), vec![Message::user(prompt)]);
-            req.json_schema = Some(JsonSchema { name: "move_explanation".into(), schema: prompts::explanation_schema() });
-            let body = wire.body_with(&req, false);
-            let mut messages = body["messages"].as_array().cloned().unwrap_or_default();
-            messages.push(json!({"role": "assistant", "content": answer.to_string()}));
-            let line = json!({
-                "id": r.id,
-                "messages": messages,
-                "meta": {"band": r.band, "elo": r.elo, "teacher": teacher.model(), "judge": score, "prompt_version": prompts::EXPLAIN_VERSION},
-            });
-            (r, Ok(line))
+            let line = accept(r, &ctx, &x.explanation, teacher.model(), judge_p.as_deref(), min_judge, wire).await;
+            (r, line)
         }
     }))
     .buffer_unordered(jobs);

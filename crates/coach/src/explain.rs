@@ -161,7 +161,7 @@ pub async fn explain_moment(
             )));
             continue;
         }
-        let explanation = finish(m, &draft, better, &f, provider, &c.model);
+        let explanation = finish(m, &draft, better, &f, provider.kind(), &c.model);
         return Ok(Explained {
             explanation,
             request: json!({"system": system, "messages": messages, "schema": schema.name}),
@@ -172,12 +172,28 @@ pub async fn explain_moment(
     unreachable!("loop returns within three attempts")
 }
 
+/// Check an answer produced outside this process (e.g. batch generation on
+/// another machine) exactly as a live one: parse, ground every move against
+/// the engine data, repair or strip. No correction round.
+pub fn verify_answer(
+    ctx: &GameContext,
+    m: &MoveEval,
+    mc: &MomentContext,
+    text: &str,
+    provider_kind: &str,
+    model: &str,
+) -> Result<Explanation, String> {
+    let draft: Draft = parse(text)?;
+    let (f, better) = check_draft(ctx, m, mc, &draft);
+    Ok(finish(m, &draft, better, &f, provider_kind, model))
+}
+
 fn finish(
     m: &MoveEval,
     d: &Draft,
     better: Option<BetterMove>,
     f: &Findings,
-    provider: &dyn Provider,
+    provider_kind: &str,
     model: &str,
 ) -> Explanation {
     let mut stripped = false;
@@ -213,7 +229,7 @@ fn finish(
             takeaway,
             mentioned_moves: mentioned,
             verification,
-        provider: provider.kind().to_string(),
+        provider: provider_kind.to_string(),
         model: model.to_string(),
     }
 }

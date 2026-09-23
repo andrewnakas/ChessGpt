@@ -13,6 +13,26 @@ pub struct Config {
     pub mode: String,
     pub public_url: Option<String>,
     pub dev: bool,
+    /// Coach model offered to browsers with WebGPU; None turns that off.
+    pub device_model: Option<api_types::DeviceModel>,
+}
+
+/// Default in-browser coach model (WebLLM's prebuilt list, Apache-2.0).
+pub const DEFAULT_DEVICE_MODEL: &str = "Qwen3.5-4B-q4f16_1-MLC";
+
+/// `CHESSGPT_DEVICE_MODEL` (an MLC model id, or "off"), with
+/// `CHESSGPT_DEVICE_MODEL_URL` / `_LIB` / `_MB` for a custom build.
+fn device_model() -> Option<api_types::DeviceModel> {
+    let id = env("CHESSGPT_DEVICE_MODEL").unwrap_or_else(|| DEFAULT_DEVICE_MODEL.into());
+    if id.eq_ignore_ascii_case("off") {
+        return None;
+    }
+    Some(api_types::DeviceModel {
+        size_mb: env("CHESSGPT_DEVICE_MODEL_MB").and_then(|v| v.parse().ok()).unwrap_or(2600),
+        url: env("CHESSGPT_DEVICE_MODEL_URL"),
+        lib_url: env("CHESSGPT_DEVICE_MODEL_LIB"),
+        id,
+    })
 }
 
 fn env(k: &str) -> Option<String> {
@@ -64,6 +84,7 @@ impl Config {
             engine_hash_mb: env("ENGINE_HASH_MB").and_then(|v| v.parse().ok()),
             public_url: env("CHESSGPT_PUBLIC_URL"),
             dev: env("CHESSGPT_DEV").is_some_and(|v| v != "0"),
+            device_model: device_model(),
             mode,
         }
     }

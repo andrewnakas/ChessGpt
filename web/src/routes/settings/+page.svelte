@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getContext, onMount } from 'svelte';
   import { api } from '$lib/api/client';
+  import { device } from '$lib/llm/device.svelte';
   import type { Meta, Provider, ProviderKind, ProviderTestResult, Settings } from '$lib/api/types';
 
   const app = getContext<{ refresh: () => Promise<void>; meta: Meta | null; mode: string }>('app');
@@ -148,6 +149,28 @@
       </form>
     {/if}
   </section>
+
+  {#if app.mode !== 'browser' && app.meta?.device_model}
+    {@const dm = app.meta.device_model}
+    <section class="card pad">
+      <h2>Coach on this device</h2>
+      <p class="muted small">
+        Run chessgpt's coach model in this browser, free. It downloads once (about {(dm.size_mb / 1000).toFixed(1)} GB,
+        then cached) and needs WebGPU: a recent Chrome, Edge or Safari on a computer with a decent graphics chip.
+        Nothing you ask leaves this site.
+      </p>
+      {#if device.status === 'ready'}
+        <p class="ok">✓ Running <span class="mono">{device.modelId}</span>{#if device.answered} · {device.answered} answers so far{/if}</p>
+        <button class="ghost small danger" onclick={() => device.disable()}>Turn off</button>
+      {:else if device.status === 'loading'}
+        <progress max="1" value={device.progress}></progress>
+        <p class="muted small">{device.detail}</p>
+      {:else}
+        {#if device.status === 'unsupported' || device.status === 'error'}<p class="error small">{device.detail}</p>{/if}
+        <button class="primary" onclick={() => device.enable(dm)}>Download and turn on</button>
+      {/if}
+    </section>
+  {/if}
 
   <section class="card pad">
     <h2>AI coach</h2>

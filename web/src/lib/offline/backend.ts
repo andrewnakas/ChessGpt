@@ -21,6 +21,8 @@ import type {
 import { browserEngine } from './engine';
 import { bookInfo, parseGames, phase, tag, type ParsedGame } from './game';
 import { gameAccuracy, judge, keyMoments, moveAccuracy } from './judge';
+import { progressFrom } from './progress';
+import { baseSeconds, estimate } from './rating';
 import { loadSettings, saveSettings, store, type StoredGame } from './store';
 
 export class OfflineError extends Error {
@@ -38,6 +40,7 @@ export const offlineMeta: Meta = {
   mode: 'browser',
   has_provider: false,
   managed_provider: false,
+  device_model: null,
   provider_label: null,
   budget_used: null
 };
@@ -217,6 +220,9 @@ async function runAnalysis(gameId: string, analysis: GameAnalysis) {
   analysis.white_accuracy = acc.white;
   analysis.black_accuracy = acc.black;
   emit(id, { type: 'accuracy', white: acc.white, black: acc.black });
+  const base = baseSeconds(g.summary.time_control);
+  analysis.white_estimate = estimate(analysis.moves.filter((m) => m.mover === 'white'), base);
+  analysis.black_estimate = estimate(analysis.moves.filter((m) => m.mover === 'black'), base);
   const keys = keyMoments(analysis.moves, analysis.user_side, g.summary.result);
   analysis.key_moments = keys;
   analysis.moves = analysis.moves.map((m) => ({ ...m, is_key_moment: keys.includes(m.ply) }));
@@ -242,6 +248,8 @@ async function startAnalysis(gameId: string, req: AnalyseGameRequest): Promise<A
     start_score: null,
     white_accuracy: null,
     black_accuracy: null,
+    white_estimate: null,
+    black_estimate: null,
     moves: [],
     key_moments: [],
     explanations: [],
@@ -298,6 +306,7 @@ export const offline = {
   importGames: importGames,
   analyse: startAnalysis,
   analysis: async (id: string) => (await findAnalysis(id)).analysis!,
+  progress: async () => progressFrom(await store.all()),
   cancelAnalysis: async (id: string) => {
     const j = jobs.get(id);
     if (j) j.cancelled = true;

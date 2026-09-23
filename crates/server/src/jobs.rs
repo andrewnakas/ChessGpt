@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use api_types::{EloTier, Explanation, GameAnalysis, JobEvent, JobStage, JobStatus, MoveEval};
+use api_types::{EloTier, Explanation, GameAnalysis, JobEvent, JobStage, JobStatus, MoveEval, Side};
 use coach::analysis::{deep_pass, engine_pass};
 use coach::explain::{explain_moment, review_game};
 use coach::key_moments;
@@ -89,6 +89,64 @@ pub fn spawn(state: AppState, p: JobParams) {
     });
 }
 
+/// Turn the user's clear mistakes into "find the better move" puzzles.
+async fn make_puzzles(
+    state: &AppState,
+    analysis_id: &str,
+    game_id: &str,
+    parsed: &chess_core::pgn::ParsedGame,
+    moves: &[MoveEval],
+    side: Side,
+) {
+    for (i, m) in moves.iter().enumerate() {
+        if m.mover != side || !m.classification.is_error() || m.delta_wc < 0.15 || m.win_before < key_moments::ALREADY_LOST {
+            continue;
+        }
+        let Some(pm) = parsed.moves.get(i) else { continue };
+        let draft = match coach::puzzles::from_mistake(&state.pool, &pm.fen_before, &m.uci, 16).await {
+            Ok(Some(d)) => d,
+            Ok(None) => continue,
+            Err(e) => {
+                tracing::warn!("puzzle analysis failed: {e}");
+                return;
+            }
+        };
+        let mut themes = vec![];
+        if let Ok(before) = chess_core::position::parse_fen(&pm.fen_before)
+            && let Some(mv) = chess_core::position::uci_to_move(&before, &m.uci)
+        {
+            let refutation = moves.get(i + 1).map(|n| n.best_line_san.as_slice()).unwrap_or(&[]);
+            let (missed, allowed) = chess_core::motifs::mistake_motifs(&before, mv, &m.best_line_san, refutation);
+            themes = missed.iter().chain(&allowed).map(|t| t.tag().to_string()).collect();
+            themes.dedup();
+        }
+        let p = db::NewPuzzle {
+            game_id: game_id.into(),
+            analysis_id: analysis_id.into(),
+            ply: m.ply,
+            fen: draft.fen,
+            solution_uci: draft.solution_uci,
+            line_san: draft.line_san,
+            themes,
+        };
+        if let Err(e) = state.db.add_puzzle(&p).await {
+            tracing::warn!("could not save puzzle: {e}");
+        }
+    }
+}
+
+/// The user's most frequent mistake motifs (at least three times), e.g.
+/// "hanging piece (12 times)", for the coach to connect moments to.
+async fn recurring_patterns(db: &db::Db) -> Vec<String> {
+    let mut by_tag: HashMap<String, i64> = HashMap::new();
+    for (tag, _, n) in db.mistake_motif_counts().await.unwrap_or_default() {
+        *by_tag.entry(tag).or_default() += n;
+    }
+    let mut v: Vec<(String, i64)> = by_tag.into_iter().filter(|(_, n)| *n >= 3).collect();
+    v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    v.into_iter().take(3).map(|(t, n)| format!("{} ({n} times)", coach::tags::label(&t).to_lowercase())).collect()
+}
+
 fn emit(h: &JobHandle, e: JobEvent) {
     let _ = h.tx.send(e);
 }
@@ -128,14 +186,24 @@ async fn run(state: &AppState, p: &JobParams, h: &JobHandle) -> Result<(), Strin
 
     db.set_start_score(&p.analysis_id, Some(pass.start_score)).await.map_err(s)?;
     db.set_accuracy(&p.analysis_id, pass.white_accuracy, pass.black_accuracy).await.map_err(s)?;
+    let base = parsed.tag("TimeControl").and_then(chess_core::rating::base_seconds);
+    let [white_est, black_est] = [Side::White, Side::Black].map(|side| {
+        let stats: Vec<_> = pass.moves.iter().filter(|m| m.mover == side).map(coach::rating_stat).collect();
+        chess_core::rating::estimate(&stats, base)
+    });
+    db.set_estimates(&p.analysis_id, white_est, black_est).await.map_err(s)?;
     emit(h, JobEvent::Accuracy { white: pass.white_accuracy, black: pass.black_accuracy });
 
     // 2. Key moments and the mistake index.
     let result = parsed.tag("Result").unwrap_or("*");
-    let keys = key_moments::select(&pass.moves, analysis.user_side, result, key_moments::DEFAULT_MAX);
+    let band = coach::bands::Band::from_elo(analysis.elo);
+    let keys = key_moments::for_band(&pass.moves, analysis.user_side, result, band);
     db.set_key_moments(&p.analysis_id, &keys).await.map_err(s)?;
     emit(h, JobEvent::KeyMoments { plies: keys.clone() });
     db.index_mistakes(&p.analysis_id).await.map_err(s)?;
+    if let Some(side) = analysis.user_side {
+        make_puzzles(state, &p.analysis_id, &analysis.game_id, parsed, &pass.moves, side).await;
+    }
 
     if !p.explain || keys.is_empty() {
         return Ok(());
@@ -158,7 +226,10 @@ async fn run(state: &AppState, p: &JobParams, h: &JobHandle) -> Result<(), Strin
         .map_err(|e| e.to_string())?;
 
     // 4. Explanations, three at a time.
-    let ctx = GameContext::new(parsed, analysis.user_side, analysis.elo, game.summary.opening.clone());
+    let mut ctx = GameContext::new(parsed, analysis.user_side, analysis.elo, game.summary.opening.clone());
+    if analysis.user_side.is_some() {
+        ctx.recurring = recurring_patterns(db).await;
+    }
     let total_expl = contexts.len() as u32;
     let mut finished = 0u32;
     let jobs = futures::stream::iter(contexts.into_iter().map(|mc| {

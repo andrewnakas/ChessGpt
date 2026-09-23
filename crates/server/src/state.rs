@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::error::{ApiResult, AppError};
 use crate::jobs::Jobs;
 use crate::managed::{Budget, Budgeted, ManagedLlm};
+use crate::relay::{Relay, RelayHub};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -21,6 +22,10 @@ pub struct AppState {
     /// The operator's own model, shared by all users (no user keys).
     pub managed: Option<Arc<ManagedLlm>>,
     pub budget: Arc<Budget>,
+    /// Browser tabs running the coach model, by user.
+    pub relay: Arc<RelayHub>,
+    /// The signed-in account this state is scoped to (None in local mode).
+    pub user: Option<String>,
 }
 
 impl AppState {
@@ -31,12 +36,33 @@ impl AppState {
 
     /// This state with the database scoped to `user_id`.
     pub fn scoped(&self, user_id: &str) -> AppState {
-        AppState { db: self.db.for_user(user_id), ..self.clone() }
+        AppState { db: self.db.for_user(user_id), user: Some(user_id.to_string()), ..self.clone() }
     }
 
-    /// The LLM to use: the operator's managed model when configured,
-    /// otherwise the user's default provider from Settings.
+    /// Key for per-user relay state.
+    pub fn user_key(&self) -> &str {
+        self.user.as_deref().unwrap_or("local")
+    }
+
+    /// The LLM to use: the model in the user's browser when a tab has one
+    /// loaded (falling back to the server's), else the server's model.
     pub async fn provider(&self) -> ApiResult<Arc<dyn llm::Provider>> {
+        let server = self.server_provider().await;
+        if let Some(model) = self.relay.device_model(self.user_key()) {
+            return Ok(Arc::new(Relay {
+                hub: self.relay.clone(),
+                user: self.user_key().to_string(),
+                model,
+                fallback: server.ok(),
+                dead: Default::default(),
+            }));
+        }
+        server
+    }
+
+    /// The operator's managed model when configured, otherwise the user's
+    /// default provider from Settings.
+    pub async fn server_provider(&self) -> ApiResult<Arc<dyn llm::Provider>> {
         if let Some(m) = &self.managed {
             let inner = llm::build(llm::ProviderConfig {
                 kind: m.kind,

@@ -5,6 +5,8 @@
 //!   gen-types        write web/src/lib/api/types.ts (--check fails if stale)
 //!   dev              run the API server and the Vite dev server together
 //!   build            production build: web bundle embedded in one release binary
+//!   eval-set PGN...  build the coach eval set with Stockfish (chessgpt-lab build-set)
+//!   eval             score the model in LAB_LLM_* on the eval set (chessgpt-lab eval)
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
@@ -24,11 +26,29 @@ fn main() -> Result<()> {
         Some("gen-types") => gen_types(args.iter().any(|a| a == "--check")),
         Some("dev") => dev(),
         Some("build") => build(),
+        Some("eval-set") => lab("build-set", &args[1..], &["--out", "fixtures/eval/moments.jsonl"]),
+        Some("eval") => {
+            let model = std::env::var("LAB_LLM_MODEL").unwrap_or_else(|_| "model".into()).replace(['/', ':'], "_");
+            let out = format!("target/eval/{model}.json");
+            lab("eval", &args[1..], &["--out", &out])
+        }
         _ => {
-            eprintln!("usage: cargo xtask <setup|fetch-stockfish|gen-types [--check]|dev|build>");
+            eprintln!("usage: cargo xtask <setup|fetch-stockfish|gen-types [--check]|dev|build|eval-set|eval>");
             std::process::exit(2);
         }
     }
+}
+
+/// Run the lab tool, adding `defaults` for flags the caller did not pass.
+fn lab(cmd: &str, args: &[String], defaults: &[&str]) -> Result<()> {
+    let mut c = Command::new(env!("CARGO"));
+    c.args(["run", "-q", "-p", "lab", "--", cmd]).args(args).current_dir(root());
+    for pair in defaults.chunks(2) {
+        if !args.iter().any(|a| a == pair[0]) {
+            c.args(pair);
+        }
+    }
+    run(c, "chessgpt-lab")
 }
 
 /// `npm` is a .cmd shim on Windows and cannot be spawned directly.

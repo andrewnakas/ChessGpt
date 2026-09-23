@@ -1,0 +1,24 @@
+[package]
+name = "lab"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "chessgpt-lab"
+path = "src/main.rs"
+
+[dependencies]
+api-types.workspace = true
+chess-core.workspace = true
+coach.workspace = true
+engine.workspace = true
+llm.workspace = true
+shakmaty.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+anyhow.workspace = true

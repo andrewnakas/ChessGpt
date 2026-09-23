@@ -468,21 +468,50 @@ impl ChessMcp {
     #[tool(
         name = "my_weaknesses",
         title = "My weaknesses",
-        description = "Summarise the user's recurring mistakes across their analysed games on chessgpt: counts by theme (tactics, strategy, opening, endgame concepts) and by game phase. Use it to suggest what to study.",
+        description = "Summarise the user's recurring mistakes across their analysed games on chessgpt: tactical motifs they missed or allowed (forks, pins, hanging pieces...), error rates by game phase, and their estimated playing strength. Use it to suggest what to study.",
         annotations(title = "My weaknesses", read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false)
     )]
     async fn my_weaknesses(&self, rc: RequestContext<RoleServer>) -> Result<CallToolResult, ErrorData> {
         let c = self.ctx(&rc)?;
-        let tags = c.state.db.mistake_counts_by_tag().await.map_err(db_err)?;
-        let phases = c.state.db.mistake_counts_by_phase().await.map_err(db_err)?;
-        let text = if tags.is_empty() && phases.is_empty() {
-            "No analysed mistakes yet. Analyse a few of the user's games first (analyze_game).".to_string()
+        let db = &c.state.db;
+        let motifs = db.mistake_motif_counts().await.map_err(db_err)?;
+        let phases = db.phase_counts().await.map_err(db_err)?;
+        let games = db.progress_games().await.map_err(db_err)?;
+        let moves: u32 = phases.iter().map(|(_, m, _)| m).sum();
+        let text = if motifs.is_empty() && phases.is_empty() {
+            "No analysed mistakes yet. Analyse a few of the user's games first (analyze_game), with their side set.".to_string()
         } else {
-            let t: Vec<String> = tags.iter().take(10).map(|(t, n)| format!("{} ({n})", coach::tags::label(t))).collect();
-            let p: Vec<String> = phases.iter().map(|(t, n)| format!("{t} ({n})")).collect();
-            format!("By theme: {}\nBy phase: {}", if t.is_empty() { "not tagged yet".into() } else { t.join(", ") }, p.join(", "))
+            let mut by_tag: std::collections::BTreeMap<&str, (i64, i64)> = Default::default();
+            for (t, kind, n) in &motifs {
+                let e = by_tag.entry(t.as_str()).or_default();
+                if kind == "allowed" { e.1 += n } else { e.0 += n }
+            }
+            let mut tags: Vec<_> = by_tag.into_iter().collect();
+            tags.sort_by_key(|(_, (m, a))| -(m + a));
+            let t: Vec<String> = tags
+                .iter()
+                .take(8)
+                .map(|(t, (m, a))| format!("{} (missed {m}, allowed {a})", coach::tags::label(t)))
+                .collect();
+            let p: Vec<String> = phases
+                .iter()
+                .map(|(ph, m, e)| format!("{}: {e} errors in {m} moves", ph.as_str()))
+                .collect();
+            let est: Vec<u32> = games.iter().filter_map(|g| g.estimate).collect();
+            let strength = chess_core::rating::rolling(&est)
+                .map(|(r, m)| format!("\nEstimated playing strength from move quality (last {} games): about {r} ± {m}.", est.len().min(chess_core::rating::ROLLING_GAMES)))
+                .unwrap_or_default();
+            format!(
+                "Across {} analysed games ({moves} of the user's moves).\nBy motif: {}\nBy phase: {}{strength}",
+                games.len(),
+                if t.is_empty() { "none found".into() } else { t.join(", ") },
+                p.join("; ")
+            )
         };
-        Ok(result(text, json!({ "kind": "weaknesses", "themes": tags, "phases": phases, "url": format!("{}/", c.base) })))
+        let themes: Vec<Value> = motifs.iter().map(|(t, k, n)| json!({"tag": t, "kind": k, "count": n})).collect();
+        let phases_json: Vec<Value> =
+            phases.iter().map(|(p, m, e)| json!({"phase": p.as_str(), "moves": m, "errors": e})).collect();
+        Ok(result(text, json!({ "kind": "weaknesses", "themes": themes, "phases": phases_json, "url": format!("{}/progress", c.base) })))
     }
 }
 

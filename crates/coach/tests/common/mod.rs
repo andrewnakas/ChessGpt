@@ -34,11 +34,12 @@ pub struct MockProvider {
     pub replies: Mutex<VecDeque<Completion>>,
     pub requests: Mutex<Vec<ChatRequest>>,
     pub json: bool,
+    pub kind: &'static str,
 }
 
 impl MockProvider {
     pub fn new(replies: Vec<Completion>) -> MockProvider {
-        MockProvider { replies: Mutex::new(replies.into()), requests: Mutex::new(vec![]), json: true }
+        MockProvider { replies: Mutex::new(replies.into()), requests: Mutex::new(vec![]), json: true, kind: "mock" }
     }
 }
 
@@ -69,7 +70,7 @@ pub fn tool_reply(id: &str, name: &str, input: serde_json::Value) -> Completion 
 #[async_trait::async_trait]
 impl Provider for MockProvider {
     fn kind(&self) -> &str {
-        "mock"
+        self.kind
     }
     fn model(&self) -> &str {
         "mock-1"

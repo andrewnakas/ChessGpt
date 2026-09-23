@@ -230,6 +230,11 @@ pub struct GameAnalysis {
     pub start_score: Option<Score>,
     pub white_accuracy: Option<f64>,
     pub black_accuracy: Option<f64>,
+    /// Estimated rating each side played at in this game (see chess_core::rating).
+    #[serde(default)]
+    pub white_estimate: Option<u32>,
+    #[serde(default)]
+    pub black_estimate: Option<u32>,
     pub moves: Vec<MoveEval>,
     pub key_moments: Vec<u32>,
     pub explanations: Vec<Explanation>,
@@ -278,6 +283,102 @@ pub enum JobEvent {
     Review { review: GameReview },
     Done { analysis: GameAnalysis },
     Error { message: String },
+}
+
+// ---------------------------------------------------------------- progress
+
+/// One analysed game in the user's progress history.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ProgressGame {
+    pub game_id: String,
+    pub date: Option<String>,
+    pub imported_at: i64,
+    pub user_side: Side,
+    pub opponent: String,
+    pub user_elo: Option<u32>,
+    pub opponent_elo: Option<u32>,
+    /// 1, 0.5 or 0 for the user; None if unfinished.
+    pub score: Option<f64>,
+    pub time_control: Option<String>,
+    pub accuracy: Option<f64>,
+    /// Estimated rating the user played at in this game.
+    pub estimate: Option<u32>,
+    /// The user's moves, and how many were mistakes or blunders.
+    pub moves: u32,
+    pub errors: u32,
+}
+
+/// How often the user's mistakes involve one motif.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct MotifRate {
+    pub tag: String,
+    pub label: String,
+    /// Mistakes where the better line used this motif (the user missed it).
+    pub missed: u32,
+    /// Mistakes that let the opponent use it.
+    pub allowed: u32,
+    pub per_100_moves: f64,
+    /// Typical rate for players of the user's rating band, when known.
+    pub baseline_per_100: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct PhaseRate {
+    pub phase: Phase,
+    pub moves: u32,
+    pub errors: u32,
+    pub per_100_moves: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct Progress {
+    /// Oldest first.
+    pub games: Vec<ProgressGame>,
+    /// Rating from the last 20 per-game estimates (corrected for shrinkage).
+    pub rolling_estimate: Option<u32>,
+    /// ± margin of that rating (about one standard error).
+    pub estimate_margin: Option<u32>,
+    /// Performance rating over the last 20 games with a rated opponent.
+    pub performance: Option<u32>,
+    pub user_moves: u32,
+    /// Most frequent first.
+    pub motifs: Vec<MotifRate>,
+    pub phases: Vec<PhaseRate>,
+}
+
+// ---------------------------------------------------------------- puzzles
+
+/// A training puzzle: find the move from a position.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct Puzzle {
+    pub id: String,
+    /// "mistake": a position from the user's own game.
+    pub source: String,
+    pub game_id: Option<String>,
+    pub analysis_id: Option<String>,
+    pub ply: Option<u32>,
+    pub fen: String,
+    pub solution_uci: Vec<String>,
+    /// The engine's line from the solution on (SAN), for after solving.
+    pub line_san: Vec<String>,
+    pub themes: Vec<String>,
+    pub reps: u32,
+    pub lapses: u32,
+    pub due_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct PuzzleAttempt {
+    pub solved: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct PuzzleQueue {
+    pub due: Vec<Puzzle>,
+    pub total: u32,
+    pub due_count: u32,
+    /// Solved at least twice in a row.
+    pub learned: u32,
 }
 
 // ---------------------------------------------------------------- import
@@ -500,6 +601,29 @@ pub struct Meta {
     pub provider_label: Option<String>,
     /// Today's share of the site's AI budget already used, 0..1, when capped.
     pub budget_used: Option<f64>,
+    /// A coach model the browser can download and run itself (WebGPU).
+    pub device_model: Option<DeviceModel>,
+}
+
+/// An in-browser coach model (WebLLM / MLC format).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DeviceModel {
+    /// MLC model id, e.g. "Qwen3-4B-q4f16_1-MLC".
+    pub id: String,
+    /// Weights location for a model outside WebLLM's built-in list.
+    pub url: Option<String>,
+    /// Compiled model library (.wasm) for such a model.
+    pub lib_url: Option<String>,
+    /// Approximate download size.
+    pub size_mb: u32,
+}
+
+/// A coach request for the browser's model: an OpenAI Chat Completions body.
+/// Answer with `POST /api/llm/relay/{id}` and the `chat.completion` object.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct LlmRelayRequest {
+    pub id: String,
+    pub body: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -531,7 +655,8 @@ pub fn typescript() -> String {
         GameSource, JobStatus, GameSummary, GameDetail, MoveEval, BetterMove,
         VerificationStatus, Verification, Explanation, GameReview, GameAnalysis,
         AnalyseGameRequest, AnalyseGameResponse, JobStage, JobEvent,
-        ImportRequest, ImportResponse,
+        ImportRequest, ImportResponse, DeviceModel, LlmRelayRequest,
+        ProgressGame, MotifRate, PhaseRate, Progress, Puzzle, PuzzleAttempt, PuzzleQueue,
         ChatRole, ToolCallView, ChatMessage, ChatThread, ChatThreadDetail,
         CreateThreadRequest, SendMessageRequest, ChatEvent,
         ProviderKind, Provider, ProviderInput, ProviderTestResult, Settings, SettingsInput, Meta, ApiError,

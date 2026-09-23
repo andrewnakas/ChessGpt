@@ -51,6 +51,16 @@ pub fn turning_point(moves: &[MoveEval], result: &str) -> Option<u32> {
 /// and the largest swing in each phase. Two errors by the same player within
 /// two plies collapse to the larger.
 pub fn select(moves: &[MoveEval], user_side: Option<Side>, result: &str, max: usize) -> Vec<u32> {
+    select_with(moves, user_side, result, max, 1.0)
+}
+
+/// [`select`] for a rating band: errors below `min_severity` (1 inaccuracy,
+/// 2 mistake, 3 blunder) are not candidates, though the phase swings still are.
+pub fn for_band(moves: &[MoveEval], user_side: Option<Side>, result: &str, band: crate::bands::Band) -> Vec<u32> {
+    select_with(moves, user_side, result, band.max_moments(), band.min_severity())
+}
+
+fn select_with(moves: &[MoveEval], user_side: Option<Side>, result: &str, max: usize, min_severity: f64) -> Vec<u32> {
     let weight = |m: &MoveEval| {
         let own = user_side.is_none_or(|s| s == m.mover);
         let base = severity(m.classification) * m.delta_wc.max(0.0);
@@ -59,7 +69,7 @@ pub fn select(moves: &[MoveEval], user_side: Option<Side>, result: &str, max: us
     // Errors from an already-lost position teach little: skip them.
     let mut scored: Vec<(f64, u32, Side)> = moves
         .iter()
-        .filter(|m| m.classification.is_error() && m.win_before >= ALREADY_LOST)
+        .filter(|m| m.classification.is_error() && severity(m.classification) >= min_severity && m.win_before >= ALREADY_LOST)
         .map(|m| (weight(m), m.ply, m.mover))
         .collect();
 
@@ -138,6 +148,19 @@ mod tests {
         let k = select(&moves, Some(Side::White), "1-0", 2);
         assert_eq!(k.len(), 2);
         assert!(k.contains(&10), "blunders always rank high: {k:?}");
+    }
+
+    #[test]
+    fn low_bands_skip_inaccuracies() {
+        use crate::bands::Band;
+        let mut moves: Vec<MoveEval> = (1..=40).map(|p| mv(p, Classification::Good, 0.0, 55.0)).collect();
+        moves[4] = mv(5, Classification::Inaccuracy, 0.08, 52.0);
+        moves[20] = mv(21, Classification::Mistake, 0.25, 40.0);
+        moves[30] = mv(31, Classification::Inaccuracy, 0.09, 38.0);
+        let club = for_band(&moves, Some(Side::White), "0-1", Band::Club);
+        assert!(club.contains(&5) && club.contains(&21), "{club:?}");
+        let novice = for_band(&moves, Some(Side::White), "0-1", Band::Novice);
+        assert!(novice.contains(&21) && !novice.contains(&31), "{novice:?}");
     }
 
     #[test]

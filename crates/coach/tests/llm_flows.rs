@@ -65,7 +65,7 @@ fn prompt_snapshots() {
     let mut beginner = ctx.clone();
     beginner.tier = EloTier::Beginner;
     beginner.elo = 900;
-    assert!(prompts::explain_system(&beginner).contains("Define any chess term"));
+    assert!(prompts::explain_system(&beginner).contains("explain it in a few words"));
     insta::assert_snapshot!("review_system", prompts::review_system(&ctx));
 }
 
@@ -208,4 +208,30 @@ async fn chat_runs_tools_and_verifies() {
     assert!(reqs[1].messages.iter().any(|m| m.parts.iter().any(|p| matches!(p, llm::Part::ToolResult { call_id, .. } if call_id == "t1"))));
     assert!(reqs[0].tools.iter().any(|t| t.name == "analyse_position"));
     assert!(!reqs[0].tools.iter().any(|t| t.name == "opening_lookup"), "explorer disabled");
+}
+
+#[tokio::test]
+async fn small_models_get_engine_lines_up_front() {
+    let Some(pool) = common::deterministic_pool().await else { return };
+    let (_, _, mc) = opera_moment();
+    let env = ToolEnv { pool, tier: EloTier::Intermediate, explorer: None, game: None };
+    let mut p = MockProvider::new(vec![text_reply("Na6 develops with tempo.")]);
+    p.kind = "browser";
+    let (tx, _rx) = mpsc::unbounded_channel();
+    let input = TurnInput {
+        history: vec![],
+        text: "What should Black play?".into(),
+        fen: mc.fen_before.clone(),
+        ply: Some(17),
+        move_path: vec![],
+        elo: 1300,
+        start_fen: None,
+    };
+    let r = run_turn(&p, &env, input, &tx).await.unwrap();
+    assert_eq!(r.tool_calls.len(), 1);
+    assert_eq!(r.tool_calls[0].name, "analyse_position");
+    let reqs = p.requests.lock().unwrap();
+    assert_eq!(reqs.len(), 1, "no extra round needed");
+    assert_eq!(reqs[0].messages.len(), 3, "question, prefetched call, its result");
+    assert_eq!(r.new_messages.len(), 4);
 }

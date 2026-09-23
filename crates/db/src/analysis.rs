@@ -1,6 +1,8 @@
 use api_types::{
     EloTier, Explanation, GameAnalysis, GameReview, JobStatus, MoveEval, Score, Side,
 };
+use chess_core::motifs::mistake_motifs;
+use chess_core::position::{parse_fen, uci_to_move};
 use engine::{Analysis, AnalysisStore, PvLine};
 use sqlx::Row;
 use sqlx::sqlite::SqliteRow;
@@ -174,6 +176,17 @@ impl Db {
         Ok(())
     }
 
+    pub async fn set_estimates(&self, id: &str, white: Option<u32>, black: Option<u32>) -> Result<()> {
+        sqlx::query("UPDATE game_analyses SET white_estimate = ?, black_estimate = ?, updated_at = ? WHERE id = ?")
+            .bind(white.map(i64::from))
+            .bind(black.map(i64::from))
+            .bind(now_ms())
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     pub async fn set_key_moments(&self, id: &str, plies: &[u32]) -> Result<()> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("UPDATE game_analyses SET key_moments_json = ?, updated_at = ? WHERE id = ?")
@@ -311,6 +324,8 @@ impl Db {
             start_score: start.map(|s| serde_json::from_str(&s)).transpose()?,
             white_accuracy: r.try_get("white_accuracy")?,
             black_accuracy: r.try_get("black_accuracy")?,
+            white_estimate: r.try_get::<Option<i64>, _>("white_estimate")?.map(|v| v as u32),
+            black_estimate: r.try_get::<Option<i64>, _>("black_estimate")?.map(|v| v as u32),
             key_moments: serde_json::from_str(&r.try_get::<String, _>("key_moments_json")?)?,
             review: review.map(|s| serde_json::from_str(&s)).transpose()?,
             error: r.try_get("error")?,
@@ -333,49 +348,65 @@ impl Db {
         rows.iter().map(|r| Ok((r.try_get("id")?, r.try_get("user_id")?))).collect()
     }
 
-    /// Record the player's errors in the mistake index (untagged).
+    /// Record the player's errors in the mistake index, tagged with the
+    /// tactical motifs they missed or allowed (untagged when there are none).
     pub async fn index_mistakes(&self, analysis_id: &str) -> Result<u32> {
         let a = self.analysis(analysis_id).await?;
         let game = self.game(&a.game_id).await?;
-        let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM mistake_index WHERE analysis_id = ?")
             .bind(analysis_id)
-            .execute(&mut *tx)
+            .execute(&self.pool)
             .await?;
-        tx.commit().await?;
         let mut n = 0;
-        for m in &a.moves {
+        for (i, m) in a.moves.iter().enumerate() {
             if !m.classification.is_error() || a.user_side.is_some_and(|s| s != m.mover) {
                 continue;
             }
             let Some(pm) = game.parsed.moves.get(m.ply as usize - 1) else { continue };
             let pid = self.position_id(&pm.fen_before).await?;
-            sqlx::query(
-                "INSERT OR REPLACE INTO mistake_index (user_id, game_id, analysis_id, ply, position_id, fen, side,
-                   classification, phase, concept_tag, delta_wc, played_uci, best_uci, created_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,'',?,?,?,?)",
-            )
-            .bind(&self.user_id)
-            .bind(&a.game_id)
-            .bind(analysis_id)
-            .bind(m.ply as i64)
-            .bind(pid)
-            .bind(&pm.fen_before)
-            .bind(side_str(m.mover))
-            .bind(m.classification.as_str())
-            .bind(m.phase.as_str())
-            .bind(m.delta_wc)
-            .bind(&m.uci)
-            .bind(&m.best_uci)
-            .bind(now_ms())
-            .execute(&self.pool)
-            .await?;
+            let mut tags: Vec<(&str, &str)> = vec![];
+            if let Ok(before) = parse_fen(&pm.fen_before)
+                && let Some(played) = uci_to_move(&before, &m.uci)
+            {
+                let refutation = a.moves.get(i + 1).map(|n| n.best_line_san.as_slice()).unwrap_or(&[]);
+                let (missed, allowed) = mistake_motifs(&before, played, &m.best_line_san, refutation);
+                tags.extend(missed.iter().map(|t| (t.tag(), "missed")));
+                tags.extend(allowed.iter().map(|t| (t.tag(), "allowed")).filter(|(t, _)| !missed.iter().any(|x| x.tag() == *t)));
+            }
+            if tags.is_empty() {
+                tags.push(("", ""));
+            }
+            for (tag, kind) in tags {
+                sqlx::query(
+                    "INSERT OR REPLACE INTO mistake_index (user_id, game_id, analysis_id, ply, position_id, fen, side,
+                       classification, phase, concept_tag, motif_kind, delta_wc, played_uci, best_uci, created_at)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                )
+                .bind(&self.user_id)
+                .bind(&a.game_id)
+                .bind(analysis_id)
+                .bind(m.ply as i64)
+                .bind(pid)
+                .bind(&pm.fen_before)
+                .bind(side_str(m.mover))
+                .bind(m.classification.as_str())
+                .bind(m.phase.as_str())
+                .bind(tag)
+                .bind(kind)
+                .bind(m.delta_wc)
+                .bind(&m.uci)
+                .bind(&m.best_uci)
+                .bind(now_ms())
+                .execute(&self.pool)
+                .await?;
+            }
             n += 1;
         }
         Ok(n)
     }
 
-    /// Replace the untagged mistake row for a ply with one row per concept tag.
+    /// Add the explanation's concept tags to a ply's mistake rows, replacing
+    /// the untagged row and keeping the motif tags found by the engine pass.
     async fn tag_mistake(&self, analysis_id: &str, ply: u32, tags: &[String]) -> Result<()> {
         if tags.is_empty() {
             return Ok(());
@@ -387,16 +418,16 @@ impl Db {
             .await?;
         let Some(b) = base else { return Ok(()) };
         let mut tx = self.pool.begin().await?;
-        sqlx::query("DELETE FROM mistake_index WHERE analysis_id = ? AND ply = ?")
+        sqlx::query("DELETE FROM mistake_index WHERE analysis_id = ? AND ply = ? AND concept_tag = ''")
             .bind(analysis_id)
             .bind(ply as i64)
             .execute(&mut *tx)
             .await?;
         for tag in tags {
             sqlx::query(
-                "INSERT OR REPLACE INTO mistake_index (user_id, game_id, analysis_id, ply, position_id, fen, side,
-                   classification, phase, concept_tag, delta_wc, played_uci, best_uci, created_at)
-                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO mistake_index (user_id, game_id, analysis_id, ply, position_id, fen, side,
+                   classification, phase, concept_tag, motif_kind, delta_wc, played_uci, best_uci, created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,'coach',?,?,?,?)",
             )
             .bind(b.try_get::<String, _>("user_id")?)
             .bind(b.try_get::<String, _>("game_id")?)

@@ -105,6 +105,7 @@ pub async fn meta(UserState(state, _): UserState) -> ApiResult<Json<Meta>> {
             .as_ref()
             .and_then(|m| m.daily_tokens)
             .map(|limit| (state.budget.used() as f64 / limit as f64).min(1.0)),
+        device_model: state.config.device_model.clone(),
     }))
 }
 

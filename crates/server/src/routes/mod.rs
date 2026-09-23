@@ -1,6 +1,9 @@
 pub mod chat;
 pub mod engine;
 pub mod games;
+pub mod llm;
+pub mod progress;
+pub mod puzzles;
 pub mod settings;
 
 use axum::Router;
@@ -38,7 +41,12 @@ pub fn router(state: AppState) -> Router {
         .route("/connections/{client_id}", axum::routing::delete(settings::disconnect))
         .route("/chat/threads", get(chat::list).post(chat::create))
         .route("/chat/threads/{id}", get(chat::detail).delete(chat::delete))
-        .route("/chat/threads/{id}/messages", post(chat::send));
+        .route("/chat/threads/{id}/messages", post(chat::send))
+        .route("/progress", get(progress::get))
+        .route("/puzzles", get(puzzles::queue))
+        .route("/puzzles/{id}/attempt", post(puzzles::attempt))
+        .route("/llm/device", get(llm::device))
+        .route("/llm/relay/{id}", post(llm::relay_reply));
     Router::new()
         .nest("/api", api)
         .route("/.well-known/oauth-protected-resource", get(oauth::protected_resource))

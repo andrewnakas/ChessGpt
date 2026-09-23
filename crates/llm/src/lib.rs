@@ -6,6 +6,7 @@ pub mod anthropic;
 pub mod ir;
 pub mod json;
 pub mod openai;
+pub mod prompted;
 
 use std::sync::Arc;
 use std::time::Duration;

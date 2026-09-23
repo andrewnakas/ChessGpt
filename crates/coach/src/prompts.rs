@@ -2,20 +2,22 @@
 //! version string is stored with every explanation.
 
 use api_types::{Classification, EloTier, Judgement, MoveEval, Score, Side};
+use chess_core::motifs::{line_story, move_motifs, position_motifs};
 use chess_core::pgn::ParsedGame;
-use chess_core::position::{features, legal_sans, numbered_line, parse_fen};
+use chess_core::position::{features, legal_sans, numbered_line, parse_fen, san_to_move};
 use chess_core::winpct::win_percent;
 use serde_json::{Value, json};
 use shakmaty::{Chess, Position};
 
 use crate::analysis::MomentContext;
+use crate::bands::Band;
 use crate::tags::tag_names;
 
-pub const EXPLAIN_VERSION: &str = "explain.v1";
-pub const REVIEW_VERSION: &str = "review.v1";
+pub const EXPLAIN_VERSION: &str = "explain.v2";
+pub const REVIEW_VERSION: &str = "review.v2";
 
-const EXPLAIN_SYSTEM: &str = include_str!("../prompts/explain_system.v1.md");
-const EXPLAIN_MOMENT: &str = include_str!("../prompts/explain_moment.v1.md");
+const EXPLAIN_SYSTEM: &str = include_str!("../prompts/explain_system.v2.md");
+const EXPLAIN_MOMENT: &str = include_str!("../prompts/explain_moment.v2.md");
 const REVIEW_SYSTEM: &str = include_str!("../prompts/review.v1.md");
 
 /// Everything about the game that stays constant across its prompts.
@@ -32,6 +34,8 @@ pub struct GameContext {
     pub tier: EloTier,
     pub start_fen: String,
     pub moves_san: Vec<String>,
+    /// The student's most frequent mistake patterns across their games.
+    pub recurring: Vec<String>,
 }
 
 impl GameContext {
@@ -48,6 +52,7 @@ impl GameContext {
             tier: EloTier::from_elo(elo),
             start_fen: game.start_fen.clone(),
             moves_san: game.moves.iter().map(|m| m.san.clone()).collect(),
+            recurring: vec![],
         }
     }
 
@@ -80,43 +85,14 @@ impl GameContext {
     }
 }
 
-pub fn level_guidance(t: EloTier) -> &'static str {
-    match t {
-        EloTier::Beginner => {
-            "Use plain, friendly language. Focus on the basics: undefended pieces, checks, captures and threats, simple forks and pins, king safety, development. Define any chess term in a few words the first time you use it. Show at most a few moves of any line."
-        }
-        EloTier::Intermediate => {
-            "Standard chess vocabulary (pin, fork, outpost, open file, weak square, pawn break) is fine. Explain the key idea and the concrete reason it works or fails. Short lines only."
-        }
-        EloTier::Advanced => {
-            "Assume solid tactical and positional knowledge. Be concrete: name the critical line and the positional factors behind the evaluation."
-        }
-        EloTier::Expert => {
-            "Be concise and precise. Discuss the critical variations and nuances such as move-order subtleties, prophylaxis and piece placement."
-        }
-    }
+/// How to write for a player of this rating.
+pub fn level_guidance(elo: u32) -> &'static str {
+    Band::from_elo(elo).guidance()
 }
 
-fn length_hint(t: EloTier) -> &'static str {
-    match t {
-        EloTier::Beginner => "Two or three short sentences.",
-        EloTier::Intermediate => "Two to four sentences.",
-        EloTier::Advanced => "Up to five sentences.",
-        EloTier::Expert => "Up to six dense sentences.",
-    }
-}
-
-pub fn max_line(t: EloTier) -> usize {
-    match t {
-        EloTier::Beginner => 4,
-        EloTier::Intermediate => 6,
-        EloTier::Advanced => 8,
-        EloTier::Expert => 10,
-    }
-}
-
-fn tier_label(t: EloTier) -> &'static str {
-    t.label()
+/// Longest line (in plies) to show a player of this rating.
+pub fn max_line(elo: u32) -> usize {
+    Band::from_elo(elo).max_line()
 }
 
 pub fn fmt_score(s: Score) -> String {
@@ -141,15 +117,26 @@ pub fn explain_system(ctx: &GameContext) -> String {
         EXPLAIN_SYSTEM,
         &[
             ("elo", ctx.elo.to_string()),
-            ("tier_label", tier_label(ctx.tier).into()),
-            ("level_guidance", level_guidance(ctx.tier).into()),
-            ("length_hint", length_hint(ctx.tier).into()),
-            ("max_line", max_line(ctx.tier).to_string()),
+            ("tier_label", Band::from_elo(ctx.elo).label().into()),
+            ("level_guidance", level_guidance(ctx.elo).into()),
+            ("length_hint", Band::from_elo(ctx.elo).length_hint().into()),
+            ("max_line", max_line(ctx.elo).to_string()),
             ("user_side", ctx.user_side_text().into()),
             ("tags", tag_names().join(", ")),
             ("game_header", ctx.header()),
             ("game_moves", ctx.numbered_moves()),
+            ("recurring", recurring_text(&ctx.recurring)),
         ],
+    )
+}
+
+fn recurring_text(r: &[String]) -> String {
+    if r.is_empty() {
+        return String::new();
+    }
+    format!(
+        "\nRECURRING PATTERNS in this student's analysed games: {}. When this moment is another example of one of them, say so in one short clause (\"this is the same loose-piece problem as before\"), without inventing details about other games.\n",
+        r.join(", ")
     )
 }
 
@@ -184,7 +171,7 @@ fn bullet(lines: &[String]) -> String {
 pub fn explain_moment(ctx: &GameContext, m: &MoveEval, mc: &MomentContext) -> String {
     let before = parse_fen(&mc.fen_before).expect("valid fen");
     let after = parse_fen(&mc.fen_after).expect("valid fen");
-    let plies = max_line(ctx.tier) + 2;
+    let plies = max_line(ctx.elo) + 2;
     let engine_lines = if mc.lines_before.is_empty() {
         "(none)".to_string()
     } else {
@@ -211,6 +198,15 @@ pub fn explain_moment(ctx: &GameContext, m: &MoveEval, mc: &MomentContext) -> St
             _ => "(none)".to_string(),
         }
     };
+    let played_motifs = san_to_move(&before, &m.san)
+        .map(|mv| move_motifs(&before, mv).into_iter().map(|h| h.text).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let refutation_story = match &mc.refutation {
+        Some((_, l)) if !after.is_game_over() => line_story(&after, l, plies),
+        _ => vec![],
+    };
+    let best_story = mc.lines_before.first().map(|(_, l)| line_story(&before, l, plies)).unwrap_or_default();
+    let themes_before: Vec<String> = position_motifs(&before).into_iter().map(|h| h.text).collect();
     let (white_before, white_after) = match m.mover {
         Side::White => (m.win_before, m.win_after),
         Side::Black => (100.0 - m.win_before, 100.0 - m.win_after),
@@ -251,6 +247,10 @@ pub fn explain_moment(ctx: &GameContext, m: &MoveEval, mc: &MomentContext) -> St
             ("change", format!("{:+.0}", m.win_after - m.win_before)),
             ("engine_lines", engine_lines),
             ("refutation", refutation),
+            ("played_motifs", bullet(&played_motifs)),
+            ("refutation_story", bullet(&refutation_story)),
+            ("best_story", bullet(&best_story)),
+            ("themes_before", bullet(&themes_before)),
             ("facts_before", bullet(&features(&before))),
             ("facts_after", bullet(&features(&after))),
             ("legal_moves", legal_sans(&before).join(", ")),
@@ -293,9 +293,9 @@ pub fn review_system(ctx: &GameContext) -> String {
         REVIEW_SYSTEM,
         &[
             ("elo", ctx.elo.to_string()),
-            ("tier_label", tier_label(ctx.tier).into()),
+            ("tier_label", Band::from_elo(ctx.elo).label().into()),
             ("user_side", ctx.user_side_text().into()),
-            ("level_guidance", level_guidance(ctx.tier).into()),
+            ("level_guidance", level_guidance(ctx.elo).into()),
             ("tags", tag_names().join(", ")),
             ("game_header", ctx.header()),
             ("game_moves", ctx.numbered_moves()),
@@ -318,4 +318,16 @@ pub fn review_schema() -> Value {
 /// White's win% for a White-POV score (for prompts and tests).
 pub fn white_win(s: Score) -> f64 {
     win_percent(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recurring_patterns_only_when_known() {
+        assert_eq!(recurring_text(&[]), "");
+        let t = recurring_text(&["hanging piece (12 times)".into()]);
+        assert!(t.contains("RECURRING PATTERNS") && t.contains("hanging piece (12 times)"), "{t}");
+    }
 }

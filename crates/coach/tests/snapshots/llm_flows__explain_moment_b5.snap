@@ -16,6 +16,20 @@ ENGINE LINES before the move (best first):
 REFUTATION, the opponent's best reply after b5:
 [+5.20] 10. Nxb5 cxb5 11. Bxb5+ Nbd7
 
+MOTIFS created by b5:
+- (none)
+
+MOTIFS in the REFUTATION line:
+- 10... cxb5 wins the loose knight on b5
+- 11. Bxb5+ picks up an undefended pawn
+- net result of the line: Black comes out 1 pawn(s) of material ahead (takes a knight for 2 pawns)
+
+MOTIFS in the BEST LINE (engine line 1):
+- (none)
+
+POSITION THEMES before the move:
+- the bishop on g5 pins the knight on f6 to the queen on e7; it cannot move without exposing it
+
 FACTS before the move:
 - material is level
 - captures available to Black: Nxe4

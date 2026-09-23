@@ -14,6 +14,17 @@ Every move the model mentions is checked against the engine before you see it.
   lines to check them, reads the opening explorer, and looks up your game.
 - **No hallucinated moves** – illegal or invented moves trigger a correction round, then
   are stripped; lines are replaced with the engine's. Each answer shows whether it was verified.
+- **Progress** – an estimate of the rating you play at, from move quality, averaged over
+  your recent games, plus a performance rating, and what your mistakes are made of: the forks,
+  pins and loose pieces you missed or allowed, and your error rate by game phase.
+- **Train** – every clear mistake in your games becomes a "find the better move" puzzle on a
+  spaced-repetition schedule, and Lichess puzzles on your weakest theme fill the gaps.
+- **Play** – spar with a bot at any rating from 600 to 2600: Stockfish held back to play like a
+  person of that rating. It runs in your browser, and the finished game goes straight into
+  analysis.
+- **A free coach** – a small open model runs in your browser over WebGPU and explains using
+  facts the program has already verified. The server's CPU is the fallback. See
+  [docs/coach-model.md](docs/coach-model.md).
 - **Inside Claude and ChatGPT** – people add `https://chessgpt.com/mcp` as a connector and use
   chessgpt from the assistant they already pay for: Stockfish, move checking, their library and
   an interactive board, no API key. Every result links back to the site. See
@@ -56,6 +67,7 @@ All optional; see `.env.example`.
 | `CHESSGPT_PUBLIC_URL` | | e.g. `https://chessgpt.com`; required for the connector |
 | `ANTHROPIC_API_KEY` or `CHESSGPT_LLM_*` | | the site's own model; hides key settings from users |
 | `CHESSGPT_LLM_DAILY_TOKENS` | unlimited | daily token cap for the site's model |
+| `CHESSGPT_DEVICE_MODEL` | `Qwen3.5-4B-q4f16_1-MLC` | coach model offered to browsers (`off` to disable) |
 
 API keys are stored encrypted with a per-install key (`keyring.key` in the data directory).
 

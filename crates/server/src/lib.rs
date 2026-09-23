@@ -9,6 +9,7 @@ pub mod jobs;
 pub mod managed;
 pub mod mcp;
 pub mod oauth;
+pub mod relay;
 pub mod routes;
 pub mod state;
 
@@ -72,5 +73,7 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
         pending: Arc::new(auth::PendingLogins::default()),
         managed: managed.map(Arc::new),
         budget: Arc::new(managed::Budget::default()),
+        relay: Arc::new(relay::RelayHub::default()),
+        user: None,
     })
 }

@@ -209,6 +209,21 @@ async fn analysis_lifecycle_and_mistake_index() {
     let summary = db.game_summary(&g.id).await.unwrap();
     assert_eq!(summary.analysis_status, Some(JobStatus::Done));
     assert_eq!(summary.white_accuracy, Some(95.0));
+
+    // Progress: the game counts once the user's side is known.
+    assert!(db.progress_games().await.unwrap().is_empty());
+    db.set_user_side(&g.id, Some(Side::Black)).await.unwrap();
+    db.set_estimates(&id, Some(2100), Some(1250)).await.unwrap();
+    let p = db.progress_games().await.unwrap();
+    assert_eq!(p.len(), 1);
+    assert_eq!(p[0].user_side, Side::Black);
+    assert_eq!(p[0].estimate, Some(1250));
+    assert_eq!(p[0].score, Some(0.0));
+    assert_eq!((p[0].moves, p[0].errors), (16, 1));
+    let phases = db.phase_counts().await.unwrap();
+    assert_eq!(phases, vec![(Phase::Opening, 16, 1)]);
+    let kinds = db.mistake_motif_counts().await.unwrap();
+    assert!(kinds.iter().all(|(_, k, _)| k == "coach"), "{kinds:?}");
 }
 
 #[tokio::test]
@@ -309,4 +324,30 @@ async fn oauth_code_and_token_lifecycle() {
     assert_eq!(db.for_user(&u.id).connected_clients().await.unwrap().len(), 1);
     db.for_user(&u.id).disconnect_client("cid").await.unwrap();
     assert!(db.access_grant(&t2.access_token).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn puzzles_are_scheduled() {
+    let db = Db::open_memory().await.unwrap();
+    let g = opera(&db).await;
+    let p = crate::NewPuzzle {
+        game_id: g.id.clone(),
+        analysis_id: "a1".into(),
+        ply: 8,
+        fen: chess_core::position::START_FEN.into(),
+        solution_uci: vec!["e2e4".into()],
+        line_san: vec!["e4".into(), "e5".into()],
+        themes: vec!["fork".into()],
+    };
+    assert!(db.add_puzzle(&p).await.unwrap());
+    assert!(!db.add_puzzle(&p).await.unwrap(), "once per game and ply");
+    let due = db.due_puzzles(10).await.unwrap();
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].themes, vec!["fork"]);
+    let after = db.record_attempt(&due[0].id, true).await.unwrap();
+    assert_eq!(after.reps, 1);
+    assert!(db.due_puzzles(10).await.unwrap().is_empty(), "solved: due tomorrow");
+    assert_eq!(db.puzzle_counts().await.unwrap(), (1, 0, 0));
+    let missed = db.record_attempt(&due[0].id, false).await.unwrap();
+    assert_eq!((missed.reps, missed.lapses), (0, 1));
 }

@@ -7,7 +7,9 @@ mod chat;
 mod oauth;
 mod games;
 mod keyring;
+mod progress;
 mod providers;
+mod puzzles;
 mod settings;
 
 use std::path::Path;
@@ -27,6 +29,7 @@ pub use oauth::{OAuthClient, OAuthGrant};
 pub use games::{GameRecord, NewGame};
 pub use keyring::KeyRing;
 pub use providers::ProviderRecord;
+pub use puzzles::NewPuzzle;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {

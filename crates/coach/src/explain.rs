@@ -101,7 +101,7 @@ fn check_draft(
             return None;
         }
         let mut bm = BetterMove { san: b.san.clone(), line_san: b.line_san.clone(), reason: b.reason.clone() };
-        repair_better_move(&g, &before, &candidates, &mut bm, prompts::max_line(ctx.tier), &mut f);
+        repair_better_move(&g, &before, &candidates, &mut bm, prompts::max_line(ctx.elo), &mut f);
         Some(bm)
     });
     for text in [&d.headline, &d.why_it_matters, &d.takeaway] {

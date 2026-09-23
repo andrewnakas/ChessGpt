@@ -95,7 +95,11 @@ export type GameAnalysis = { id: string, game_id: string, status: JobStatus, elo
 /**
  * White-POV eval of the starting position.
  */
-start_score: Score | null, white_accuracy: number | null, black_accuracy: number | null, moves: Array<MoveEval>, key_moments: Array<number>, explanations: Array<Explanation>, review: GameReview | null, error: string | null, created_at: number, };
+start_score: Score | null, white_accuracy: number | null, black_accuracy: number | null, 
+/**
+ * Estimated rating each side played at in this game (see chess_core::rating).
+ */
+white_estimate: number | null, black_estimate: number | null, moves: Array<MoveEval>, key_moments: Array<number>, explanations: Array<Explanation>, review: GameReview | null, error: string | null, created_at: number, };
 
 export type AnalyseGameRequest = { 
 /**
@@ -124,6 +128,96 @@ export type ImportResponse = { games: Array<GameSummary>,
  * Games already imported before.
  */
 duplicates: number, errors: Array<string>, };
+
+export type DeviceModel = { 
+/**
+ * MLC model id, e.g. "Qwen3-4B-q4f16_1-MLC".
+ */
+id: string, 
+/**
+ * Weights location for a model outside WebLLM's built-in list.
+ */
+url: string | null, 
+/**
+ * Compiled model library (.wasm) for such a model.
+ */
+lib_url: string | null, 
+/**
+ * Approximate download size.
+ */
+size_mb: number, };
+
+export type LlmRelayRequest = { id: string, body: JsonValue, };
+
+export type ProgressGame = { game_id: string, date: string | null, imported_at: number, user_side: Side, opponent: string, user_elo: number | null, opponent_elo: number | null, 
+/**
+ * 1, 0.5 or 0 for the user; None if unfinished.
+ */
+score: number | null, time_control: string | null, accuracy: number | null, 
+/**
+ * Estimated rating the user played at in this game.
+ */
+estimate: number | null, 
+/**
+ * The user's moves, and how many were mistakes or blunders.
+ */
+moves: number, errors: number, };
+
+export type MotifRate = { tag: string, label: string, 
+/**
+ * Mistakes where the better line used this motif (the user missed it).
+ */
+missed: number, 
+/**
+ * Mistakes that let the opponent use it.
+ */
+allowed: number, per_100_moves: number, 
+/**
+ * Typical rate for players of the user's rating band, when known.
+ */
+baseline_per_100: number | null, };
+
+export type PhaseRate = { phase: Phase, moves: number, errors: number, per_100_moves: number, };
+
+export type Progress = { 
+/**
+ * Oldest first.
+ */
+games: Array<ProgressGame>, 
+/**
+ * Rating from the last 20 per-game estimates (corrected for shrinkage).
+ */
+rolling_estimate: number | null, 
+/**
+ * ± margin of that rating (about one standard error).
+ */
+estimate_margin: number | null, 
+/**
+ * Performance rating over the last 20 games with a rated opponent.
+ */
+performance: number | null, user_moves: number, 
+/**
+ * Most frequent first.
+ */
+motifs: Array<MotifRate>, phases: Array<PhaseRate>, };
+
+export type Puzzle = { id: string, 
+/**
+ * "mistake": a position from the user's own game.
+ */
+source: string, game_id: string | null, analysis_id: string | null, ply: number | null, fen: string, solution_uci: Array<string>, 
+/**
+ * The engine's line from the solution on (SAN), for after solving.
+ */
+line_san: Array<string>, themes: Array<string>, reps: number, lapses: number, due_at: number, };
+
+export type PuzzleAttempt = { solved: boolean, };
+
+export type PuzzleQueue = { due: Array<Puzzle>, total: number, due_count: number, 
+/**
+ * Solved at least twice in a row.
+ */
+learned: number, };
 
 export type ChatRole = "user" | "assistant";
 
@@ -194,7 +288,11 @@ provider_label: string | null,
 /**
  * Today's share of the site's AI budget already used, 0..1, when capped.
  */
-budget_used: number | null, };
+budget_used: number | null, 
+/**
+ * A coach model the browser can download and run itself (WebGPU).
+ */
+device_model: DeviceModel | null, };
 
 export type ApiError = { error: string, };
 

@@ -30,6 +30,12 @@ impl OpenAiCompat {
     }
 
     pub fn body(&self, req: &ChatRequest) -> Value {
+        self.body_with(req, true)
+    }
+
+    /// Request body; `stream: false` for transports that return one
+    /// `chat.completion` object (the in-browser relay).
+    pub fn body_with(&self, req: &ChatRequest, stream: bool) -> Value {
         let mut system = req.system.clone();
         if let Some(s) = &req.json_schema
             && !self.hosted()
@@ -42,13 +48,13 @@ impl OpenAiCompat {
         }
         let mut messages = vec![json!({"role": "system", "content": system})];
         messages.extend(to_wire(&req.messages));
-        let mut body = json!({"model": self.cfg.model, "stream": true, "messages": messages});
+        let mut body = json!({"model": self.cfg.model, "stream": stream, "messages": messages});
         if self.cfg.kind == ProviderKind::Openai {
             body["max_completion_tokens"] = json!(req.max_tokens);
         } else {
             body["max_tokens"] = json!(req.max_tokens);
         }
-        if self.hosted() {
+        if self.hosted() && stream {
             body["stream_options"] = json!({"include_usage": true});
         }
         if !req.tools.is_empty() {
@@ -62,9 +68,9 @@ impl OpenAiCompat {
                 })
                 .collect();
         }
-        if let Some(s) = &req.json_schema
-            && self.hosted()
-        {
+        // llama.cpp, Ollama, LM Studio and vLLM also enforce `json_schema`
+        // (grammar-constrained decoding); the prompt copy above stays as a hint.
+        if let Some(s) = &req.json_schema {
             body["response_format"] = json!({"type": "json_schema", "json_schema": {
                 "name": s.name, "schema": s.schema, "strict": true
             }});
@@ -146,7 +152,7 @@ impl Provider for OpenAiCompat {
     }
 
     fn caps(&self) -> Caps {
-        Caps { tools: true, json_schema: self.hosted() }
+        Caps { tools: true, json_schema: true }
     }
 
     async fn send(
@@ -182,74 +188,97 @@ impl Provider for OpenAiCompat {
         }
 
         let mut stream = eventsource_stream::EventStream::new(resp.bytes_stream());
-        let mut text = String::new();
-        let mut calls: BTreeMap<u64, (String, String, String)> = BTreeMap::new();
-        let mut finish: Option<String> = None;
-        let mut usage = Usage::default();
-        let mut model = self.cfg.model.clone();
+        let mut acc = Accum::new(&self.cfg.model);
         while let Some(ev) = stream.next().await {
             let ev = ev.map_err(|e| LlmError::Stream { provider: provider.clone(), message: e.to_string() })?;
             if ev.data.trim() == "[DONE]" {
                 break;
             }
             let Ok(data) = serde_json::from_str::<Value>(&ev.data) else { continue };
-            if let Some(err) = data.get("error") {
-                return Err(LlmError::Api {
-                    provider,
-                    status: 500,
-                    message: err["message"].as_str().unwrap_or("stream error").to_string(),
-                });
-            }
-            if let Some(m) = data["model"].as_str() {
-                model = m.to_string();
-            }
-            if let Some(u) = data.get("usage").filter(|u| u.is_object()) {
-                usage.input_tokens = u["prompt_tokens"].as_u64().unwrap_or(0) as u32;
-                usage.output_tokens = u["completion_tokens"].as_u64().unwrap_or(0) as u32;
-                usage.cache_read_tokens =
-                    u["prompt_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0) as u32;
-            }
-            let Some(choice) = data["choices"].get(0) else { continue };
-            let d = &choice["delta"];
-            if let Some(s) = d["content"].as_str().filter(|s| !s.is_empty()) {
-                text.push_str(s);
-                if let Some(tx) = events {
-                    let _ = tx.send(StreamEvent::TextDelta(s.to_string()));
-                }
-            }
-            if let Some(s) = d["reasoning_content"].as_str().or(d["reasoning"].as_str()).filter(|s| !s.is_empty())
-                && let Some(tx) = events
-            {
-                let _ = tx.send(StreamEvent::ThinkingDelta(s.to_string()));
-            }
-            if let Some(tcs) = d["tool_calls"].as_array() {
-                for (n, tc) in tcs.iter().enumerate() {
-                    let idx = tc["index"].as_u64().unwrap_or(n as u64);
-                    let entry = calls.entry(idx).or_default();
-                    if let Some(id) = tc["id"].as_str().filter(|s| !s.is_empty()) {
-                        entry.0 = id.to_string();
-                    }
-                    if let Some(name) = tc["function"]["name"].as_str().filter(|s| !s.is_empty()) {
-                        entry.1.push_str(name);
-                        if let Some(tx) = events {
-                            let _ = tx.send(StreamEvent::ToolCallStart { id: entry.0.clone(), name: entry.1.clone() });
-                        }
-                    }
-                    if let Some(a) = tc["function"]["arguments"].as_str() {
-                        entry.2.push_str(a);
-                    }
-                }
-            }
-            if let Some(f) = choice["finish_reason"].as_str() {
-                finish = Some(f.to_string());
-            }
+            acc.chunk(&provider, &data, events)?;
         }
+        Ok(acc.finish())
+    }
+}
 
-        let mut parts = vec![];
-        if !text.is_empty() {
-            parts.push(Part::Text { text });
+/// Folds Chat Completions stream chunks into one [`Completion`].
+struct Accum {
+    text: String,
+    calls: BTreeMap<u64, (String, String, String)>,
+    finish: Option<String>,
+    usage: Usage,
+    model: String,
+}
+
+impl Accum {
+    fn new(model: &str) -> Accum {
+        Accum { text: String::new(), calls: BTreeMap::new(), finish: None, usage: Usage::default(), model: model.into() }
+    }
+
+    fn chunk(
+        &mut self,
+        provider: &str,
+        data: &Value,
+        events: Option<&mpsc::UnboundedSender<StreamEvent>>,
+    ) -> Result<(), LlmError> {
+        if let Some(err) = data.get("error") {
+            return Err(LlmError::Api {
+                provider: provider.into(),
+                status: 500,
+                message: err["message"].as_str().or(err.as_str()).unwrap_or("stream error").to_string(),
+            });
         }
-        for (i, (id, name, args)) in calls {
+        if let Some(m) = data["model"].as_str() {
+            self.model = m.to_string();
+        }
+        if let Some(u) = data.get("usage").filter(|u| u.is_object()) {
+            self.usage.input_tokens = u["prompt_tokens"].as_u64().unwrap_or(0) as u32;
+            self.usage.output_tokens = u["completion_tokens"].as_u64().unwrap_or(0) as u32;
+            self.usage.cache_read_tokens = u["prompt_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0) as u32;
+        }
+        let Some(choice) = data["choices"].get(0) else { return Ok(()) };
+        let d = if choice.get("delta").is_some() { &choice["delta"] } else { &choice["message"] };
+        if let Some(s) = d["content"].as_str().filter(|s| !s.is_empty()) {
+            self.text.push_str(s);
+            if let Some(tx) = events {
+                let _ = tx.send(StreamEvent::TextDelta(s.to_string()));
+            }
+        }
+        if let Some(s) = d["reasoning_content"].as_str().or(d["reasoning"].as_str()).filter(|s| !s.is_empty())
+            && let Some(tx) = events
+        {
+            let _ = tx.send(StreamEvent::ThinkingDelta(s.to_string()));
+        }
+        if let Some(tcs) = d["tool_calls"].as_array() {
+            for (n, tc) in tcs.iter().enumerate() {
+                let idx = tc["index"].as_u64().unwrap_or(n as u64);
+                let entry = self.calls.entry(idx).or_default();
+                if let Some(id) = tc["id"].as_str().filter(|s| !s.is_empty()) {
+                    entry.0 = id.to_string();
+                }
+                if let Some(name) = tc["function"]["name"].as_str().filter(|s| !s.is_empty()) {
+                    entry.1.push_str(name);
+                    if let Some(tx) = events {
+                        let _ = tx.send(StreamEvent::ToolCallStart { id: entry.0.clone(), name: entry.1.clone() });
+                    }
+                }
+                if let Some(a) = tc["function"]["arguments"].as_str() {
+                    entry.2.push_str(a);
+                }
+            }
+        }
+        if let Some(f) = choice["finish_reason"].as_str() {
+            self.finish = Some(f.to_string());
+        }
+        Ok(())
+    }
+
+    fn finish(self) -> Completion {
+        let mut parts = vec![];
+        if !self.text.is_empty() {
+            parts.push(Part::Text { text: self.text });
+        }
+        for (i, (id, name, args)) in self.calls {
             let src = if args.trim().is_empty() { "{}" } else { args.as_str() };
             let input = match serde_json::from_str::<Value>(src) {
                 Ok(v @ Value::Object(_)) => v,
@@ -259,7 +288,7 @@ impl Provider for OpenAiCompat {
             parts.push(Part::ToolCall { id, name, input });
         }
         let has_calls = parts.iter().any(|p| matches!(p, Part::ToolCall { .. }));
-        let stop = match finish.as_deref() {
+        let stop = match self.finish.as_deref() {
             Some("tool_calls") | Some("function_call") => StopReason::ToolUse,
             Some("length") => StopReason::MaxTokens,
             Some("content_filter") => StopReason::Refusal(Some("content_filter".into())),
@@ -267,8 +296,15 @@ impl Provider for OpenAiCompat {
             Some("stop") | None => StopReason::EndTurn,
             Some(other) => StopReason::Other(other.into()),
         };
-        Ok(Completion { message: Message { role: Role::Assistant, parts }, stop, usage, model })
+        Completion { message: Message { role: Role::Assistant, parts }, stop, usage: self.usage, model: self.model }
     }
+}
+
+/// Parse a non-streaming `chat.completion` object (or an `{"error": ...}`).
+pub fn completion_from_response(provider: &str, v: &Value, default_model: &str) -> Result<Completion, LlmError> {
+    let mut acc = Accum::new(default_model);
+    acc.chunk(provider, v, None)?;
+    Ok(acc.finish())
 }
 
 #[cfg(test)]
@@ -348,11 +384,26 @@ mod tests {
         let mut req = ChatRequest::new("sys", msgs);
         req.json_schema = Some(JsonSchema { name: "x".into(), schema: json!({"type": "object"}) });
         let ollama = p(ProviderKind::Ollama, "http://localhost:11434/v1").body(&req);
-        assert!(ollama.get("response_format").is_none());
+        assert_eq!(ollama["response_format"]["type"], "json_schema");
         assert!(ollama["messages"][0]["content"].as_str().unwrap().contains("JSON Schema"));
         assert!(ollama.get("max_tokens").is_some());
         let or = p(ProviderKind::Openrouter, "https://openrouter.ai/api/v1").body(&req);
         assert_eq!(or["response_format"]["json_schema"]["strict"], true);
+    }
+
+    #[test]
+    fn parses_non_streaming_completion() {
+        let v = json!({"model": "qwen3-4b", "choices": [{"message": {"role": "assistant", "content": "hi",
+            "tool_calls": [{"id": "t1", "type": "function", "function": {"name": "legal_moves", "arguments": "{\"fen\":\"f\"}"}}]},
+            "finish_reason": "tool_calls"}], "usage": {"prompt_tokens": 9, "completion_tokens": 3}});
+        let c = completion_from_response("browser", &v, "x").unwrap();
+        assert_eq!(c.model, "qwen3-4b");
+        assert_eq!(c.message.text(), "hi");
+        assert_eq!(c.message.tool_calls()[0].1, "legal_moves");
+        assert_eq!(c.stop, StopReason::ToolUse);
+        assert_eq!(c.usage.output_tokens, 3);
+        let e = completion_from_response("browser", &json!({"error": "out of memory"}), "x").unwrap_err();
+        assert!(e.to_string().contains("out of memory"));
     }
 
     #[tokio::test]

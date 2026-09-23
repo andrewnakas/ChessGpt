@@ -126,7 +126,7 @@ pub async fn engine_pass(
 }
 
 /// Engine context for one key moment, from the deep pass.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MomentContext {
     pub ply: u32,
     pub fen_before: String,

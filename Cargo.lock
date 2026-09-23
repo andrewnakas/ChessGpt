@@ -1536,6 +1536,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lab"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "api-types",
+ "chess-core",
+ "coach",
+ "engine",
+ "futures",
+ "llm",
+ "serde",
+ "serde_json",
+ "shakmaty",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { coachAvailable } from '$lib/llm/device.svelte';
   import type { DrawShape } from '@lichess-org/chessground/draw';
   import type { Key } from '@lichess-org/chessground/types';
   import { getContext } from 'svelte';
@@ -156,7 +157,7 @@
       {fen}
       ply={null}
       movePath={startFen === START_FEN ? movePath : []}
-      hasProvider={!!app.meta?.has_provider}
+      hasProvider={coachAvailable(app.meta?.has_provider)}
       onshapes={(s) => (toolShapes = s)}
     />
   </section>

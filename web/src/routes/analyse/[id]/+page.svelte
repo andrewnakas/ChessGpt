@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from '$app/state';
+  import { coachAvailable } from '$lib/llm/device.svelte';
   import type { DrawShape } from '@lichess-org/chessground/draw';
   import type { Key } from '@lichess-org/chessground/types';
   import { getContext, onMount } from 'svelte';
@@ -74,7 +75,7 @@
       elo = s.elo;
       side = g.summary.user_side ?? 'none';
       orientation = g.summary.user_side ?? 'white';
-      explain = app.meta?.has_provider ?? false;
+      explain = coachAvailable(app.meta?.has_provider);
       analysis = g.analysis;
       if (analysis && (analysis.status === 'queued' || analysis.status === 'running')) listen(analysis.id);
       const firstKey = analysis?.key_moments[0];
@@ -516,8 +517,8 @@
                 <option value="black">Black</option>
               </select>
             </label>
-            <label class="check" title={app.meta?.has_provider ? '' : 'Add an AI provider in Settings'}>
-              <input type="checkbox" bind:checked={explain} disabled={!app.meta?.has_provider} /> Coach explanations
+            <label class="check" title={coachAvailable(app.meta?.has_provider) ? '' : 'Turn on the coach in Settings'}>
+              <input type="checkbox" bind:checked={explain} disabled={!coachAvailable(app.meta?.has_provider)} /> Coach explanations
             </label>
             <button class="primary" type="submit" disabled={starting}>
               {analysis ? 'Analyse again' : 'Analyse game'}
@@ -555,7 +556,7 @@
             explanation={explanations.get(currentMove.ply)}
             pending={pending.has(currentMove.ply)}
             failed={failed[currentMove.ply]}
-            canExplain={!!app.meta?.has_provider && analysis.status !== 'running'}
+            canExplain={coachAvailable(app.meta?.has_provider) && analysis.status !== 'running'}
             onexplain={explainNow}
             onshowline={showLine}
           />
@@ -578,7 +579,7 @@
           fen={currentFen}
           ply={variation.length ? null : ply}
           {movePath}
-          hasProvider={!!app.meta?.has_provider}
+          hasProvider={coachAvailable(app.meta?.has_provider)}
           onshapes={(s) => (toolShapes = s)}
         />
       </div>

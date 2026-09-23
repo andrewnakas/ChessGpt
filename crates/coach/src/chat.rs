@@ -60,9 +60,9 @@ pub fn system_prompt(env: &ToolEnv, elo: u32) -> String {
     };
     CHAT_SYSTEM
         .replace("{{elo}}", &elo.to_string())
-        .replace("{{tier_label}}", env.tier.label())
+        .replace("{{tier_label}}", crate::bands::Band::from_elo(elo).label())
         .replace("{{explorer_line}}", explorer_line)
-        .replace("{{level_guidance}}", level_guidance(env.tier))
+        .replace("{{level_guidance}}", level_guidance(elo))
         .replace("{{game_line}}", &game_line)
 }
 
@@ -79,6 +79,12 @@ pub fn board_note(input: &TurnInput) -> Result<String, ChatError> {
         note.push_str(&format!(" This is ply {p} of the game."));
     }
     Ok(note)
+}
+
+/// Small local and in-browser models call tools poorly, so their turns start
+/// with the engine lines (and the game) already fetched.
+pub fn wants_prefetch(p: &dyn Provider) -> bool {
+    matches!(p.kind(), "browser" | "ollama" | "openai_compatible")
 }
 
 pub async fn run_turn(
@@ -105,6 +111,26 @@ pub async fn run_turn(
 
     let mut new_messages = vec![user];
     let mut tool_calls = vec![];
+    if wants_prefetch(provider) {
+        let mut pre = vec![("pre_1", "analyse_position", serde_json::json!({"fen": input.fen, "lines": 3}))];
+        if env.game.is_some() {
+            pre.push(("pre_2", "game_context", serde_json::json!({})));
+        }
+        let calls = pre
+            .iter()
+            .map(|(id, name, v)| Part::ToolCall { id: (*id).into(), name: (*name).into(), input: v.clone() })
+            .collect();
+        new_messages.push(Message { role: Role::Assistant, parts: calls });
+        let mut results = vec![];
+        for (id, name, v) in pre {
+            let _ = events.send(ChatEvent::ToolCall { id: id.into(), name: name.into(), input: v.clone() });
+            let out = run_tool(env, &mut grounding, id, name, &v).await;
+            let _ = events.send(ChatEvent::ToolResult { call: out.view.clone() });
+            tool_calls.push(out.view.clone());
+            results.push(Part::ToolResult { call_id: id.into(), content: out.content, is_error: out.view.is_error });
+        }
+        new_messages.push(Message { role: Role::User, parts: results });
+    }
     let mut usage = Usage::default();
     let mut text = String::new();
     let mut model = provider.model().to_string();

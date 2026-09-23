@@ -4,6 +4,7 @@
   import { page } from '$app/state';
   import { api, authListeners, mode, type Account, type Mode } from '$lib/api/client';
   import type { Meta } from '$lib/api/types';
+  import { coachAvailable, device } from '$lib/llm/device.svelte';
   import { onMount, setContext } from 'svelte';
 
   let { children } = $props();
@@ -27,6 +28,7 @@
     try {
       meta = await api.meta();
       app.meta = meta;
+      void device.resume(meta.device_model);
     } catch {
       /* 401 handled by listener */
     }
@@ -66,6 +68,9 @@
     { href: '/', label: 'Games' },
     { href: '/import', label: 'Import' },
     { href: '/board', label: 'Board' },
+    { href: '/progress', label: 'Progress' },
+    { href: '/train', label: 'Train' },
+    { href: '/play', label: 'Play' },
     { href: '/connect', label: 'Claude & ChatGPT' },
     { href: '/settings', label: 'Settings' }
   ];
@@ -86,7 +91,7 @@
   <div class="right muted">
     {#if meta}
       <span title="{meta.engine_workers} engine workers × {meta.engine_threads} threads">{meta.engine}</span>
-      {#if !meta.has_provider}<a class="warn" href="/settings">No AI provider</a>{/if}
+      {#if !coachAvailable(meta.has_provider)}<a class="warn" href="/settings">{meta.device_model ? 'Turn on the coach' : 'No AI provider'}</a>{/if}
     {/if}
     {#if app.account}
       <span class="who">{app.account.display_name}</span>

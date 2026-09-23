@@ -12,12 +12,37 @@ services:
       ENGINE_THREADS: ${ENGINE_THREADS:-2}
       ENGINE_HASH_MB: ${ENGINE_HASH_MB:-512}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # With COMPOSE_PROFILES=llm, point these at the llama service below:
+      # CHESSGPT_LLM_PROVIDER=openai_compatible, CHESSGPT_LLM_BASE_URL=http://llama:8080/v1
+      CHESSGPT_LLM_PROVIDER: ${CHESSGPT_LLM_PROVIDER:-}
+      CHESSGPT_LLM_BASE_URL: ${CHESSGPT_LLM_BASE_URL:-}
+      CHESSGPT_LLM_API_KEY: ${CHESSGPT_LLM_API_KEY:-}
       CHESSGPT_LLM_MODEL: ${CHESSGPT_LLM_MODEL:-}
       CHESSGPT_LLM_DAILY_TOKENS: ${CHESSGPT_LLM_DAILY_TOKENS:-3000000}
       CHESSGPT_OPENAI_CHALLENGE: ${CHESSGPT_OPENAI_CHALLENGE:-}
+      # In-browser coach model offered to visitors ("off" to disable).
+      CHESSGPT_DEVICE_MODEL: ${CHESSGPT_DEVICE_MODEL:-}
+      CHESSGPT_DEVICE_MODEL_URL: ${CHESSGPT_DEVICE_MODEL_URL:-}
+      CHESSGPT_DEVICE_MODEL_LIB: ${CHESSGPT_DEVICE_MODEL_LIB:-}
+      CHESSGPT_DEVICE_MODEL_MB: ${CHESSGPT_DEVICE_MODEL_MB:-}
       RUST_LOG: info
     volumes:
       - chessgpt-data:/data
+
+  # Free coach fallback on the CPU for browsers without WebGPU. Opt in with
+  # COMPOSE_PROFILES=llm in .env. One request at a time; the Always Free A1
+  # shape (4 OCPU / 24 GB) runs a 4B Q4 model at a few tokens per second.
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    profiles: [llm]
+    restart: unless-stopped
+    command: >
+      -hf ${LLAMA_HF_MODEL:-unsloth/Qwen3.5-4B-GGUF:Q4_K_M}
+      --host 0.0.0.0 --port 8080 --alias coach
+      --ctx-size 8192 --parallel 1 --threads ${LLAMA_THREADS:-2}
+      --jinja --reasoning-budget 0
+    volumes:
+      - llama-models:/root/.cache/llama.cpp
 
   tunnel:
     image: cloudflare/cloudflared:latest
@@ -30,3 +55,4 @@ services:
 
 volumes:
   chessgpt-data:
+  llama-models:

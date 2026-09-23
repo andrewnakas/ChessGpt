@@ -54,7 +54,8 @@ impl OpenAiCompat {
         } else {
             body["max_tokens"] = json!(req.max_tokens);
         }
-        if self.hosted() && stream {
+        // OpenAI, OpenRouter, llama.cpp, vLLM and Ollama all report usage this way.
+        if stream {
             body["stream_options"] = json!({"include_usage": true});
         }
         if !req.tools.is_empty() {

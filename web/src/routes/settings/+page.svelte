@@ -3,7 +3,7 @@
   import { api } from '$lib/api/client';
   import type { Meta, Provider, ProviderKind, ProviderTestResult, Settings } from '$lib/api/types';
 
-  const app = getContext<{ refresh: () => Promise<void>; meta: Meta | null }>('app');
+  const app = getContext<{ refresh: () => Promise<void>; meta: Meta | null; mode: string }>('app');
 
   let settings = $state<Settings | null>(null);
   let lichessToken = $state('');
@@ -127,6 +127,7 @@
           <input type="text" bind:value={settings.chesscom_username} placeholder="optional" />
         </label>
         <p class="muted small">Usernames tell chessgpt which side you played in imported games.</p>
+        {#if app.mode !== 'browser'}
         <label>
           Lichess API token {#if settings.has_lichess_token}<span class="chip ok">stored</span>{/if}
           <input type="password" bind:value={lichessToken} placeholder={settings.has_lichess_token ? 'leave empty to keep' : 'lip_...'} autocomplete="off" />
@@ -141,6 +142,7 @@
           <input type="checkbox" bind:checked={settings.explorer_enabled} />
           Let the coach look up openings in the Lichess explorer
         </label>
+        {/if}
         {#if settingsError}<p class="error">{settingsError}</p>{/if}
         <div><button class="primary" type="submit">Save</button> {#if saved}<span class="ok">Saved</span>{/if}</div>
       </form>
@@ -149,7 +151,9 @@
 
   <section class="card pad">
     <h2>AI coach</h2>
-    {#if app.meta?.managed_provider}
+    {#if app.mode === 'browser'}
+      <p class="muted">The coach runs on the chessgpt server, which is offline right now. Games you analyse here are saved in this browser.</p>
+    {:else if app.meta?.managed_provider}
       <p>This site provides the AI coach: <b>{app.meta.provider_label}</b>. You don't need a key.</p>
       {#if app.meta.budget_used != null}
         <p class="muted small">Today's shared coach budget used: {Math.round(app.meta.budget_used * 100)}%.</p>

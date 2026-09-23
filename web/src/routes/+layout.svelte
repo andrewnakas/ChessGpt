@@ -2,7 +2,7 @@
   import '../app.css';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { api, authListeners, type Account } from '$lib/api/client';
+  import { api, authListeners, mode, type Account, type Mode } from '$lib/api/client';
   import type { Meta } from '$lib/api/types';
   import { onMount, setContext } from 'svelte';
 
@@ -14,6 +14,7 @@
     meta: null as Meta | null,
     account: null as Account | null,
     accounts: false,
+    mode: 'server' as Mode,
     refresh: async () => {}
   });
   setContext('app', app);
@@ -31,6 +32,7 @@
     }
   }
   app.refresh = async () => {
+    app.mode = await mode();
     const s = await api.session();
     app.accounts = s.accounts;
     app.account = s.account;
@@ -94,6 +96,13 @@
     {/if}
   </div>
 </header>
+
+{#if app.mode === 'browser'}
+  <div class="offline">
+    <b>Browser mode.</b> The chessgpt server is offline, so Stockfish is running in your browser and games are saved on
+    this device. The coach, accounts and the Claude/ChatGPT connector will be back when the server is.
+  </div>
+{/if}
 
 <main>
   {#if ready}
@@ -168,6 +177,13 @@
     text-align: center;
     font-size: 0.75rem;
     padding: 1rem;
+  }
+  .offline {
+    background: color-mix(in srgb, var(--warn) 18%, var(--surface));
+    border-bottom: 1px solid var(--border);
+    padding: 0.45rem 1.2rem;
+    font-size: 0.88rem;
+    text-align: center;
   }
   .who {
     color: var(--text);

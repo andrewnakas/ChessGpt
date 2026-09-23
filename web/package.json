@@ -9,12 +9,16 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "assets": "node scripts/copy-assets.mjs",
+    "predev": "node scripts/copy-assets.mjs",
+    "prebuild": "node scripts/copy-assets.mjs"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.10",
     "@sveltejs/kit": "^2.70.3",
     "@sveltejs/vite-plugin-svelte": "*",
+    "@types/node": "^26.6.2",
     "svelte": "^5.57.1",
     "svelte-check": "*",
     "typescript": "*",
@@ -23,6 +27,7 @@
   },
   "dependencies": {
     "@lichess-org/chessground": "^10.2.0",
-    "chessops": "^0.15.1"
+    "chessops": "^0.15.1",
+    "stockfish": "^19.0.0"
   }
 }

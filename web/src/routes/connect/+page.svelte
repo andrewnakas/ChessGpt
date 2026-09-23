@@ -2,7 +2,7 @@
   import { getContext, onMount } from 'svelte';
   import { api, type Account } from '$lib/api/client';
 
-  const app = getContext<{ account: Account | null; accounts: boolean }>('app');
+  const app = getContext<{ account: Account | null; accounts: boolean; mode: string }>('app');
   const mcpUrl = $derived(typeof location !== 'undefined' ? `${location.origin}/mcp` : '/mcp');
   let copied = $state(false);
   let connections = $state<{ client_id: string; name: string; last_used: number }[]>([]);
@@ -43,6 +43,10 @@
     Stockfish, move checking, and your game library. No API key, and everything it analyses is saved to your account
     here, ready to replay on the full board.
   </p>
+
+  {#if app.mode === 'browser'}
+    <p class="error">The chessgpt server is offline right now, so connecting will fail until it's back.</p>
+  {/if}
 
   <div class="url card">
     <span class="muted">Connector URL</span>

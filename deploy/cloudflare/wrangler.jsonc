@@ -1,0 +1,21 @@
+{
+  // Deploy: from the repo root, after `cd web && npm run build`:
+  //   npx wrangler deploy --config deploy/cloudflare/wrangler.jsonc
+  "name": "chessgpt",
+  "main": "./worker.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "../../web/build",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/oauth/*", "/.well-known/*", "/auth/*"]
+  },
+  "vars": {
+    // The Oracle server, reached through the Cloudflare Tunnel.
+    "ORIGIN": "https://origin.chessgpt.com"
+  },
+  "routes": [
+    { "pattern": "chessgpt.com", "custom_domain": true },
+    { "pattern": "www.chessgpt.com", "custom_domain": true }
+  ]
+}

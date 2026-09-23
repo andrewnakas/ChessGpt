@@ -4,6 +4,8 @@
   import { api, streams } from '$lib/api/client';
   import type { ChatMessage, ChatThread, ToolCallView, Verification } from '$lib/api/types';
   import { renderMarkdown } from '$lib/markdown';
+  import { getContext } from 'svelte';
+  const appCtx = getContext<{ mode?: string } | undefined>('app');
 
   interface Props {
     gameId?: string | null;
@@ -218,6 +220,8 @@
           <div class="sugg">
             {#each suggestions as s}<button class="chip" onclick={() => send(s)}>{s}</button>{/each}
           </div>
+        {:else if appCtx?.mode === 'browser'}
+          <p class="muted">The coach needs the chessgpt server, which is offline right now. Stockfish still works: turn it on below the board.</p>
         {:else}
           <p><a href="/settings">Add an AI provider</a> (Claude, OpenAI, OpenRouter or a local model) to chat.</p>
         {/if}

@@ -1,0 +1,32 @@
+# chessgpt on an Oracle Cloud Always Free server (ARM), reached only through
+# a Cloudflare Tunnel: no open ports, no certificates to manage.
+services:
+  chessgpt:
+    image: ${CHESSGPT_IMAGE:-ghcr.io/chessgpt/chessgpt:latest}
+    restart: unless-stopped
+    environment:
+      CHESSGPT_MODE: hosted
+      CHESSGPT_PUBLIC_URL: https://${CHESSGPT_DOMAIN:-chessgpt.com}
+      CHESSGPT_ALLOWED_HOSTS: origin.${CHESSGPT_DOMAIN:-chessgpt.com}
+      ENGINE_WORKERS: ${ENGINE_WORKERS:-1}
+      ENGINE_THREADS: ${ENGINE_THREADS:-2}
+      ENGINE_HASH_MB: ${ENGINE_HASH_MB:-512}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CHESSGPT_LLM_MODEL: ${CHESSGPT_LLM_MODEL:-}
+      CHESSGPT_LLM_DAILY_TOKENS: ${CHESSGPT_LLM_DAILY_TOKENS:-3000000}
+      CHESSGPT_OPENAI_CHALLENGE: ${CHESSGPT_OPENAI_CHALLENGE:-}
+      RUST_LOG: info
+    volumes:
+      - chessgpt-data:/data
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?paste the tunnel token from Cloudflare into .env}
+    depends_on:
+      - chessgpt
+
+volumes:
+  chessgpt-data:

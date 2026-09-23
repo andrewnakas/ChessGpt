@@ -99,6 +99,11 @@ pub fn service(state: &AppState) -> StreamableHttpService<ChessMcp, LocalSession
         hosts.push(host.split(':').next().unwrap_or(host).to_string());
         hosts.push(host.to_string());
     }
+    // Extra hostnames the server is reached through (e.g. the Cloudflare
+    // Tunnel origin behind the edge Worker).
+    if let Ok(extra) = std::env::var("CHESSGPT_ALLOWED_HOSTS") {
+        hosts.extend(extra.split(',').map(|h| h.trim().to_string()).filter(|h| !h.is_empty()));
+    }
     let mut cfg = StreamableHttpServerConfig::default()
         .with_legacy_session_mode(false)
         .with_json_response(true)

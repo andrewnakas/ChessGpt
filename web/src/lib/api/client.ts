@@ -1,4 +1,6 @@
 // Typed API client. Types come from crates/api-types via `cargo xtask gen-types`.
+import { browserEngine } from '../offline/engine';
+import { needsServer, offline } from '../offline/backend';
 import type {
   AnalyseGameRequest,
   AnalyseGameResponse,
@@ -71,7 +73,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   return (await res.json()) as T;
 }
 
-export const api = {
+const serverApi = {
   meta: () => request<Meta>('GET', '/meta'),
   session: () => request<SessionInfo>('GET', '/session'),
   register: (email: string, password: string, name?: string) =>
@@ -157,7 +159,7 @@ export async function sse<T>(
   }
 }
 
-export const streams = {
+const serverStreams = {
   engine: (fen: string, multipv: number, onEvent: (e: EngineEvent) => void, signal: AbortSignal, depth = 30) =>
     sse<EngineEvent>(
       `/engine/analyse?fen=${encodeURIComponent(fen)}&multipv=${multipv}&depth=${depth}&movetime_ms=30000`,
@@ -168,4 +170,97 @@ export const streams = {
     sse<JobEvent>(`/analyses/${analysisId}/events`, onEvent, { signal }),
   chat: (threadId: string, body: SendMessageRequest, onEvent: (e: ChatEvent) => void, signal: AbortSignal) =>
     sse<ChatEvent>(`/chat/threads/${threadId}/messages`, onEvent, { method: 'POST', body, signal })
+};
+
+// ---------------------------------------------------------------- mode
+
+export type Mode = 'server' | 'browser';
+let modePromise: Promise<Mode> | null = null;
+
+/** Is the chessgpt server reachable? If not, everything runs in the browser. */
+export function mode(): Promise<Mode> {
+  modePromise ??= (async () => {
+    if (typeof window === 'undefined') return 'server';
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 5000);
+      const r = await fetch('/api/health', { signal: ctrl.signal, cache: 'no-store' });
+      clearTimeout(t);
+      return r.ok && (await r.text()).trim() === 'ok' ? 'server' : 'browser';
+    } catch {
+      return 'browser';
+    }
+  })();
+  return modePromise;
+}
+
+type Fn = (...args: never[]) => Promise<unknown>;
+function routed<S extends Record<string, Fn>>(server: S, local: Partial<{ [K in keyof S]: S[K] }>, what: Partial<Record<keyof S, string>>): S {
+  const out: Record<string, Fn> = {};
+  for (const k of Object.keys(server)) {
+    out[k] = (async (...args: never[]) => {
+      if ((await mode()) === 'server') return server[k](...args);
+      const f = local[k as keyof S];
+      if (f) return f(...args);
+      throw needsServer(what[k as keyof S] ?? 'This feature');
+    }) as Fn;
+  }
+  return out as S;
+}
+
+const browserSession: SessionInfo = { accounts: false, account: null, lichess_login: false };
+
+export const api = routed(
+  serverApi,
+  {
+    meta: offline.meta,
+    session: async () => browserSession,
+    games: offline.games,
+    game: offline.game,
+    deleteGame: offline.deleteGame,
+    setSide: offline.setSide,
+    importGames: offline.importGames,
+    analyse: offline.analyse,
+    analysis: offline.analysis,
+    cancelAnalysis: offline.cancelAnalysis,
+    settings: offline.settings,
+    saveSettings: offline.saveSettings,
+    providers: async () => [],
+    threads: async () => [],
+    connections: async () => []
+  } as Partial<typeof serverApi>,
+  {
+    explainPly: 'The coach',
+    createThread: 'The coach',
+    thread: 'The coach',
+    share: 'Share links',
+    shared: 'Shared games',
+    claim: 'Saving shared games',
+    register: 'Accounts',
+    login: 'Accounts',
+    createProvider: 'AI providers',
+    testProvider: 'AI providers'
+  }
+);
+
+export const streams = {
+  engine: async (fen: string, multipv: number, onEvent: (e: EngineEvent) => void, signal: AbortSignal, depth = 30) => {
+    if ((await mode()) === 'server') return serverStreams.engine(fen, multipv, onEvent, signal, depth);
+    const a = await browserEngine().analyse(fen, {
+      multipv,
+      depth: Math.min(depth, 22),
+      movetimeMs: 20000,
+      signal,
+      onUpdate: (u) => onEvent({ type: 'update', analysis: u })
+    });
+    onEvent({ type: 'done', analysis: a });
+  },
+  job: async (analysisId: string, onEvent: (e: JobEvent) => void, signal: AbortSignal) => {
+    if ((await mode()) === 'server') return serverStreams.job(analysisId, onEvent, signal);
+    return offline.jobEvents(analysisId, onEvent, signal);
+  },
+  chat: async (threadId: string, body: SendMessageRequest, onEvent: (e: ChatEvent) => void, signal: AbortSignal) => {
+    if ((await mode()) === 'server') return serverStreams.chat(threadId, body, onEvent, signal);
+    throw needsServer('The coach');
+  }
 };

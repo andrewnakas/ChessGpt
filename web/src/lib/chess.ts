@@ -1,12 +1,27 @@
 // Board-side chess logic via chessops. The server stays the source of truth
 // for evaluations; this only handles legal moves and notation.
-import { Chess } from 'chessops/chess';
+import { Chess, normalizeMove } from 'chessops/chess';
 import { chessgroundDests } from 'chessops/compat';
 import { makeFen, parseFen } from 'chessops/fen';
 import { makeSan, parseSan } from 'chessops/san';
 import { makeUci, parseSquare, parseUci } from 'chessops/util';
 import type { Key } from '@lichess-org/chessground/types';
 import type { Classification, Score } from './api/types';
+
+/** UCI as engines write it: castling is king-to-destination (e1g1), not
+ * king-takes-rook (e1h1) as chessops represents it internally. */
+export function standardUci(pos: Chess, move: Parameters<Chess['play']>[0]): string {
+  const uci = makeUci(move);
+  if ('from' in move) {
+    const piece = pos.board.get(move.from);
+    const target = pos.board.get(move.to);
+    if (piece?.role === 'king' && target?.role === 'rook' && target.color === piece.color) {
+      const file = move.to > move.from ? 'g' : 'c';
+      return uci.slice(0, 2) + file + uci[3];
+    }
+  }
+  return uci;
+}
 
 export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -53,8 +68,9 @@ export function playMove(fen: string, orig: string, dest: string): Played | null
   const move = { from, to, promotion };
   if (!pos.isLegal(move)) return null;
   const san = makeSan(pos, move);
+  const uci = standardUci(pos, move);
   pos.play(move);
-  return { fen: makeFen(pos.toSetup()), san, uci: makeUci(move) };
+  return { fen: makeFen(pos.toSetup()), san, uci };
 }
 
 export function playSan(fen: string, san: string): Played | null {
@@ -63,18 +79,21 @@ export function playSan(fen: string, san: string): Played | null {
   const move = parseSan(pos, san.replace(/[!?]+$/, ''));
   if (!move) return null;
   const clean = makeSan(pos, move);
-  const uci = makeUci(move);
+  const uci = standardUci(pos, move);
   pos.play(move);
   return { fen: makeFen(pos.toSetup()), san: clean, uci };
 }
 
 export function playUci(fen: string, uci: string): Played | null {
   const pos = position(fen);
-  const move = parseUci(uci);
-  if (!pos || !move || !pos.isLegal(move)) return null;
+  const parsed = parseUci(uci);
+  if (!pos || !parsed) return null;
+  const move = normalizeMove(pos, parsed); // e1g1 -> chessops' king-takes-rook form
+  if (!pos.isLegal(move)) return null;
   const san = makeSan(pos, move);
+  const std = standardUci(pos, move);
   pos.play(move);
-  return { fen: makeFen(pos.toSetup()), san, uci };
+  return { fen: makeFen(pos.toSetup()), san, uci: std };
 }
 
 export function uciSquares(uci: string): [Key, Key] | null {

@@ -66,8 +66,11 @@ without a token.
 
 ## Deploy
 
-`deploy/` has a Dockerfile (web build, Rust build, Stockfish download, slim runtime), a
-Caddyfile with automatic HTTPS, and a compose file:
+For chessgpt.com: Oracle Cloud's free ARM server runs the backend, Cloudflare serves the site
+and tunnels to it, GitHub builds everything. If the server is down the site keeps working in
+browser mode (Stockfish in the visitor's browser). Step by step: [docs/deploy.md](docs/deploy.md).
+
+On your own server, `deploy/` also has a Caddy-based compose file:
 
 ```sh
 cd deploy

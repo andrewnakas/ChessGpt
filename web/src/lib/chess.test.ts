@@ -18,6 +18,13 @@ describe('chess helpers', () => {
     expect(playMove(START_FEN, 'e2', 'e5')).toBeNull();
   });
 
+  it('uses standard castling UCI both ways', () => {
+    const fen = 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1';
+    expect(playMove(fen, 'e1', 'h1')?.uci).toBe('e1g1');
+    expect(playSan(fen, 'O-O-O')?.uci).toBe('e1c1');
+    expect(playUci(fen, 'e1g1')?.san).toBe('O-O');
+  });
+
   it('auto-queens promotions', () => {
     const r = playMove('8/P7/8/8/8/8/8/k6K w - - 0 1', 'a7', 'a8')!;
     expect(r.san).toBe('a8=Q+');

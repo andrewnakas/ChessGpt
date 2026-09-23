@@ -6,3 +6,5 @@
 node_modules
 /web/build
 /web/.svelte-kit
+.DS_Store
+.wrangler/

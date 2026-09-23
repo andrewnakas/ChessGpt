@@ -39,6 +39,6 @@ chmod +x update.sh
 sudo docker compose pull
 sudo docker compose up -d
 # Check for a new image every night at 04:00.
-( crontab -l 2>/dev/null | grep -v chessgpt/update.sh; echo "0 4 * * * $DIR/update.sh >/dev/null 2>&1" ) | crontab -
+( crontab -l 2>/dev/null | grep -v chessgpt/update.sh || true; echo "0 4 * * * $DIR/update.sh >/dev/null 2>&1" ) | crontab -
 echo
 echo "chessgpt is starting. Logs: sudo docker compose -f $DIR/docker-compose.yml logs -f"

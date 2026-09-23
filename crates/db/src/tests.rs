@@ -351,3 +351,19 @@ async fn puzzles_are_scheduled() {
     let missed = db.record_attempt(&due[0].id, false).await.unwrap();
     assert_eq!((missed.reps, missed.lapses), (0, 1));
 }
+
+#[tokio::test]
+async fn linking_a_username_marks_sides() {
+    let db = Db::open_memory().await.unwrap();
+    let g = opera(&db).await;
+    assert_eq!(g.user_side, None);
+    assert!(db.linked_users().await.unwrap().is_empty());
+    db.set_chesscom_username(Some("PaulMorphy")).await.unwrap();
+    assert_eq!(db.linked_users().await.unwrap().len(), 1);
+    // Opera game: White is "Paul Morphy"; only an exact (case-insensitive) name counts.
+    let white = db.game_summary(&g.id).await.unwrap().white;
+    assert_eq!(db.mark_side_by_name("nobody").await.unwrap(), 0);
+    assert_eq!(db.mark_side_by_name(&white.to_uppercase()).await.unwrap(), 1);
+    assert_eq!(db.game_summary(&g.id).await.unwrap().user_side, Some(Side::White));
+    assert_eq!(db.mark_side_by_name(&white).await.unwrap(), 0, "already marked");
+}

@@ -141,6 +141,18 @@ impl Importers {
         Ok(ImportedGame { source: GameSource::Lichess, source_id: id, pgn })
     }
 
+    /// A Chess.com account's canonical username, or `UserNotFound`.
+    pub async fn chesscom_player(&self, username: &str) -> Result<String, ImportError> {
+        #[derive(Deserialize)]
+        struct Player {
+            username: String,
+        }
+        let username = username.trim().to_lowercase();
+        let url = format!("{}/pub/player/{}", self.chesscom_base, username);
+        let p: Player = self.chesscom_json(&url, &username).await?;
+        Ok(p.username)
+    }
+
     /// The most recent `max` standard games of a Chess.com user. Archives are
     /// fetched one at a time, newest first (Chess.com rejects parallel calls).
     pub async fn chesscom_user(&self, username: &str, max: u32) -> Result<Vec<ImportedGame>, ImportError> {

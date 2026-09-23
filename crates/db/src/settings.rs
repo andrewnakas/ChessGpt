@@ -52,4 +52,23 @@ impl Db {
             .await?;
         enc.map(|e| self.keyring.decrypt(&e)).transpose()
     }
+
+    pub async fn set_chesscom_username(&self, username: Option<&str>) -> Result<()> {
+        sqlx::query("UPDATE user_settings SET chesscom_username = ?, updated_at = ? WHERE user_id = ?")
+            .bind(username)
+            .bind(now_ms())
+            .bind(&self.user_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Users with a Lichess or Chess.com username to keep in sync.
+    pub async fn linked_users(&self) -> Result<Vec<String>> {
+        Ok(sqlx::query_scalar(
+            "SELECT user_id FROM user_settings WHERE COALESCE(lichess_username, '') != '' OR COALESCE(chesscom_username, '') != ''",
+        )
+        .fetch_all(&self.pool)
+        .await?)
+    }
 }

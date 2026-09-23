@@ -92,7 +92,10 @@
       </p>
     {/if}
     {#if tab === 'chesscom'}
-      <p class="muted small">Chess.com archives are fetched one month at a time, newest first.</p>
+      <p class="muted small">
+        Chess.com archives are fetched one month at a time, newest first. To keep new games coming in automatically,
+        <a href="/settings">link your Chess.com account</a>.
+      </p>
     {/if}
   {/if}
   {#if error}<p class="error">{error}</p>{/if}

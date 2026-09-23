@@ -21,6 +21,7 @@ async fn main() -> anyhow::Result<()> {
         state.pool.config().threads
     );
     jobs::resume_unfinished(&state).await;
+    server::sync::spawn_periodic(state.clone());
 
     let app = routes::router(state.clone());
     let listener = tokio::net::TcpListener::bind(bind).await?;

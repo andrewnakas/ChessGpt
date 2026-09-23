@@ -12,6 +12,7 @@ pub mod oauth;
 pub mod relay;
 pub mod routes;
 pub mod state;
+pub mod sync;
 
 use std::sync::Arc;
 

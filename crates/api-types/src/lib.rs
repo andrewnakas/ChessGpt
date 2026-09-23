@@ -346,6 +346,25 @@ pub struct Progress {
     pub phases: Vec<PhaseRate>,
 }
 
+// ---------------------------------------------------------------- linked accounts
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct ConnectRequest {
+    pub username: String,
+}
+
+/// What a sync of the user's Lichess / Chess.com games did.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct SyncReport {
+    /// The account name as the site spells it.
+    pub username: Option<String>,
+    /// Games new to the library.
+    pub imported: u32,
+    /// Of those, how many are being analysed now.
+    pub analysing: u32,
+    pub errors: Vec<String>,
+}
+
 // ---------------------------------------------------------------- puzzles
 
 /// A training puzzle: find the move from a position.
@@ -656,7 +675,7 @@ pub fn typescript() -> String {
         VerificationStatus, Verification, Explanation, GameReview, GameAnalysis,
         AnalyseGameRequest, AnalyseGameResponse, JobStage, JobEvent,
         ImportRequest, ImportResponse, DeviceModel, LlmRelayRequest,
-        ProgressGame, MotifRate, PhaseRate, Progress, Puzzle, PuzzleAttempt, PuzzleQueue,
+        ProgressGame, MotifRate, PhaseRate, Progress, Puzzle, PuzzleAttempt, PuzzleQueue, ConnectRequest, SyncReport,
         ChatRole, ToolCallView, ChatMessage, ChatThread, ChatThreadDetail,
         CreateThreadRequest, SendMessageRequest, ChatEvent,
         ProviderKind, Provider, ProviderInput, ProviderTestResult, Settings, SettingsInput, Meta, ApiError,

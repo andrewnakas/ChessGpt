@@ -219,6 +219,22 @@ export type PuzzleQueue = { due: Array<Puzzle>, total: number, due_count: number
  */
 learned: number, };
 
+export type ConnectRequest = { username: string, };
+
+export type SyncReport = { 
+/**
+ * The account name as the site spells it.
+ */
+username: string | null, 
+/**
+ * Games new to the library.
+ */
+imported: number, 
+/**
+ * Of those, how many are being analysed now.
+ */
+analysing: number, errors: Array<string>, };
+
 export type ChatRole = "user" | "assistant";
 
 export type ToolCallView = { id: string, name: string, input: JsonValue, summary: string, is_error: boolean, 

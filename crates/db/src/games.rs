@@ -217,6 +217,24 @@ impl Db {
         Ok(GameRecord { summary, pgn, parsed })
     }
 
+    /// Mark the user's side on games that don't have one yet, where a player
+    /// name matches `username` (case-insensitive). Returns how many changed.
+    pub async fn mark_side_by_name(&self, username: &str) -> Result<u64> {
+        let mut n = 0;
+        for (col, side) in [("white", "white"), ("black", "black")] {
+            n += sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE games SET user_side = ? WHERE user_id = ? AND user_side IS NULL AND lower({col}) = lower(?)"
+            )))
+            .bind(side)
+            .bind(&self.user_id)
+            .bind(username)
+            .execute(&self.pool)
+            .await?
+            .rows_affected();
+        }
+        Ok(n)
+    }
+
     pub async fn set_user_side(&self, id: &str, side: Option<Side>) -> Result<()> {
         sqlx::query("UPDATE games SET user_side = ? WHERE user_id = ? AND id = ?")
             .bind(side.map(side_str))

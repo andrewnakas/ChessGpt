@@ -17,6 +17,7 @@ import type {
   Progress,
   Puzzle,
   PuzzleQueue,
+  SyncReport,
   ImportRequest,
   ImportResponse,
   JobEvent,
@@ -99,6 +100,9 @@ const serverApi = {
   cancelAnalysis: (id: string) => request<void>('POST', `/analyses/${id}/cancel`),
   explainPly: (id: string, ply: number) => request<Explanation>('POST', `/analyses/${id}/explain/${ply}`),
   progress: () => request<Progress>('GET', '/progress'),
+  connectChesscom: (username: string) => request<SyncReport>('POST', '/accounts/chesscom', { username }),
+  disconnectChesscom: () => request<void>('DELETE', '/accounts/chesscom'),
+  syncAccounts: () => request<SyncReport>('POST', '/accounts/sync'),
   puzzles: () => request<PuzzleQueue>('GET', '/puzzles'),
   puzzleAttempt: (id: string, solved: boolean) => request<Puzzle>('POST', `/puzzles/${id}/attempt`, { solved }),
 
@@ -247,7 +251,9 @@ export const api = routed(
     register: 'Accounts',
     login: 'Accounts',
     createProvider: 'AI providers',
-    testProvider: 'AI providers'
+    testProvider: 'AI providers',
+    connectChesscom: 'Linking a Chess.com account',
+    syncAccounts: 'Syncing games'
   }
 );
 

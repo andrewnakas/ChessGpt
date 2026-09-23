@@ -1,3 +1,4 @@
+pub mod accounts;
 pub mod chat;
 pub mod engine;
 pub mod games;
@@ -43,6 +44,8 @@ pub fn router(state: AppState) -> Router {
         .route("/chat/threads/{id}", get(chat::detail).delete(chat::delete))
         .route("/chat/threads/{id}/messages", post(chat::send))
         .route("/progress", get(progress::get))
+        .route("/accounts/chesscom", post(accounts::connect_chesscom).delete(accounts::disconnect_chesscom))
+        .route("/accounts/sync", post(accounts::sync_now))
         .route("/puzzles", get(puzzles::queue))
         .route("/puzzles/{id}/attempt", post(puzzles::attempt))
         .route("/llm/device", get(llm::device))

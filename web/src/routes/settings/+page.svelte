@@ -2,7 +2,7 @@
   import { getContext, onMount } from 'svelte';
   import { api } from '$lib/api/client';
   import { device } from '$lib/llm/device.svelte';
-  import type { Meta, Provider, ProviderKind, ProviderTestResult, Settings } from '$lib/api/types';
+  import type { Meta, Provider, ProviderKind, ProviderTestResult, Settings, SyncReport } from '$lib/api/types';
 
   const app = getContext<{ refresh: () => Promise<void>; meta: Meta | null; mode: string }>('app');
 
@@ -52,6 +52,50 @@
     } catch (err) {
       settingsError = (err as Error).message;
     }
+  }
+
+  let chesscomInput = $state('');
+  let linking = $state(false);
+  let syncMsg = $state<string | null>(null);
+  let linkError = $state<string | null>(null);
+
+  function reportText(r: SyncReport): string {
+    const parts = [r.imported ? `${r.imported} new game${r.imported === 1 ? '' : 's'} imported` : 'No new games'];
+    if (r.analysing) parts.push(`${r.analysing} being analysed`);
+    return parts.join(', ') + '.' + (r.errors.length ? ` (${r.errors.join('; ')})` : '');
+  }
+
+  async function linkChesscom(e: Event) {
+    e.preventDefault();
+    linking = true;
+    linkError = null;
+    try {
+      const r = await api.connectChesscom(chesscomInput.trim());
+      if (settings) settings.chesscom_username = r.username;
+      syncMsg = reportText(r);
+      chesscomInput = '';
+    } catch (err) {
+      linkError = (err as Error).message;
+    } finally {
+      linking = false;
+    }
+  }
+
+  async function syncNow() {
+    linking = true;
+    try {
+      syncMsg = reportText(await api.syncAccounts());
+    } catch (err) {
+      linkError = (err as Error).message;
+    } finally {
+      linking = false;
+    }
+  }
+
+  async function unlinkChesscom() {
+    await api.disconnectChesscom();
+    if (settings) settings.chesscom_username = null;
+    syncMsg = null;
   }
 
   async function clearToken() {
@@ -149,6 +193,29 @@
       </form>
     {/if}
   </section>
+
+  {#if app.mode !== 'browser' && settings}
+    <section class="card pad">
+      <h2>Chess.com</h2>
+      {#if settings.chesscom_username}
+        <p>Linked to <b>{settings.chesscom_username}</b>. New games come in every few hours, and the newest are analysed for your Progress and Train pages.</p>
+        <button onclick={syncNow} disabled={linking}>{linking ? 'Syncing…' : 'Sync now'}</button>
+        <button class="ghost small danger" onclick={unlinkChesscom}>Unlink</button>
+      {:else}
+        <form class="link" onsubmit={linkChesscom}>
+          <input type="text" bind:value={chesscomInput} placeholder="Chess.com username" autocomplete="off" />
+          <button class="primary" type="submit" disabled={linking || !chesscomInput.trim()}>{linking ? 'Linking…' : 'Link account'}</button>
+        </form>
+        <p class="muted small">
+          Chess.com has no sign-in for other sites, but your games are public, so your username is all chessgpt needs.
+          It imports your recent games, marks your side, and keeps them in sync. Your Lichess games sync the same way
+          when your Lichess username is set.
+        </p>
+      {/if}
+      {#if syncMsg}<p class="ok small">{syncMsg}</p>{/if}
+      {#if linkError}<p class="error small">{linkError}</p>{/if}
+    </section>
+  {/if}
 
   {#if app.mode !== 'browser' && app.meta?.device_model}
     {@const dm = app.meta.device_model}
@@ -256,6 +323,13 @@
   }
   .pad {
     padding: 1rem 1.2rem;
+  }
+  form.link {
+    flex-direction: row;
+    gap: 0.5rem;
+  }
+  form.link input {
+    flex: 1;
   }
   form {
     display: flex;

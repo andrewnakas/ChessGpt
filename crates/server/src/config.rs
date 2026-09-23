@@ -9,9 +9,8 @@ pub struct Config {
     pub engine_workers: Option<usize>,
     pub engine_threads: Option<u32>,
     pub engine_hash_mb: Option<u32>,
-    /// "local" (single user, no login) or "hosted" (login required).
+    /// "local" (single user, no login) or "hosted" (user accounts).
     pub mode: String,
-    pub auth_password: Option<String>,
     pub public_url: Option<String>,
     pub dev: bool,
 }
@@ -63,7 +62,6 @@ impl Config {
             engine_workers: env("ENGINE_WORKERS").and_then(|v| v.parse().ok()),
             engine_threads: env("ENGINE_THREADS").and_then(|v| v.parse().ok()),
             engine_hash_mb: env("ENGINE_HASH_MB").and_then(|v| v.parse().ok()),
-            auth_password: env("CHESSGPT_AUTH_PASSWORD"),
             public_url: env("CHESSGPT_PUBLIC_URL"),
             dev: env("CHESSGPT_DEV").is_some_and(|v| v != "0"),
             mode,

@@ -1,19 +1,26 @@
 <script lang="ts">
   import '../app.css';
+  import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { api, authListeners } from '$lib/api/client';
+  import { api, authListeners, type Account } from '$lib/api/client';
   import type { Meta } from '$lib/api/types';
   import { onMount, setContext } from 'svelte';
 
   let { children } = $props();
   let meta = $state<Meta | null>(null);
-  let needLogin = $state(false);
-  let password = $state('');
-  let loginError = $state<string | null>(null);
   let ready = $state(false);
 
-  const app = $state({ meta: null as Meta | null, refresh: async () => {} });
+  const app = $state({
+    meta: null as Meta | null,
+    account: null as Account | null,
+    accounts: false,
+    refresh: async () => {}
+  });
   setContext('app', app);
+
+  // Pages anyone may open without signing in (hosted mode).
+  const PUBLIC = ['/login', '/share/', '/about', '/connect', '/oauth/'];
+  const isPublic = (p: string) => PUBLIC.some((x) => p === x || p.startsWith(x));
 
   async function loadMeta() {
     try {
@@ -23,39 +30,41 @@
       /* 401 handled by listener */
     }
   }
-  app.refresh = loadMeta;
+  app.refresh = async () => {
+    const s = await api.session();
+    app.accounts = s.accounts;
+    app.account = s.account;
+    if (!s.accounts || s.account) await loadMeta();
+  };
+
+  function toLogin() {
+    const p = page.url.pathname;
+    if (!isPublic(p)) goto(`/login?return=${encodeURIComponent(p + page.url.search)}`);
+  }
 
   onMount(() => {
-    const onAuth = () => (needLogin = true);
-    authListeners.add(onAuth);
-    api
-      .session()
-      .then(async (s) => {
-        needLogin = s.required && !s.authenticated;
-        if (!needLogin) await loadMeta();
+    authListeners.add(toLogin);
+    app
+      .refresh()
+      .then(() => {
+        if (app.accounts && !app.account) toLogin();
       })
       .finally(() => (ready = true));
-    return () => authListeners.delete(onAuth);
+    return () => authListeners.delete(toLogin);
   });
 
-  async function login(e: Event) {
-    e.preventDefault();
-    loginError = null;
-    try {
-      await api.login(password);
-      needLogin = false;
-      password = '';
-      await loadMeta();
-      location.reload();
-    } catch (err) {
-      loginError = (err as Error).message;
-    }
+  async function logout() {
+    await api.logout();
+    app.account = null;
+    meta = null;
+    goto('/login');
   }
 
   const nav = [
     { href: '/', label: 'Games' },
     { href: '/import', label: 'Import' },
     { href: '/board', label: 'Board' },
+    { href: '/connect', label: 'Claude & ChatGPT' },
     { href: '/settings', label: 'Settings' }
   ];
   const active = (href: string) =>
@@ -77,19 +86,17 @@
       <span title="{meta.engine_workers} engine workers × {meta.engine_threads} threads">{meta.engine}</span>
       {#if !meta.has_provider}<a class="warn" href="/settings">No AI provider</a>{/if}
     {/if}
+    {#if app.account}
+      <span class="who">{app.account.display_name}</span>
+      <button class="ghost small" onclick={logout}>Sign out</button>
+    {:else if app.accounts}
+      <a href="/login">Sign in</a>
+    {/if}
   </div>
 </header>
 
 <main>
-  {#if needLogin}
-    <form class="login card" onsubmit={login}>
-      <h2>chessgpt</h2>
-      <p class="muted">This server is private. Enter the password.</p>
-      <input type="password" bind:value={password} placeholder="Password" autocomplete="current-password" />
-      {#if loginError}<p class="error">{loginError}</p>{/if}
-      <button class="primary" type="submit">Sign in</button>
-    </form>
-  {:else if ready}
+  {#if ready}
     {@render children()}
   {/if}
 </main>
@@ -162,16 +169,13 @@
     font-size: 0.75rem;
     padding: 1rem;
   }
-  .login {
-    max-width: 360px;
-    margin: 10vh auto;
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.7rem;
+  .who {
+    color: var(--text);
+    font-weight: 600;
   }
-  .login h2 {
-    margin: 0;
+  .small {
+    font-size: 0.8rem;
+    padding: 0.15rem 0.5rem;
   }
   @media (max-width: 640px) {
     header {

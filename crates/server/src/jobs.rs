@@ -223,9 +223,9 @@ async fn run(state: &AppState, p: &JobParams, h: &JobHandle) -> Result<(), Strin
 pub async fn resume_unfinished(state: &AppState) {
     match state.db.unfinished_analyses().await {
         Ok(ids) => {
-            for id in ids {
+            for (id, owner) in ids {
                 tracing::info!("resuming analysis {id}");
-                spawn(state.clone(), JobParams { analysis_id: id, explain: true });
+                spawn(state.scoped(&owner), JobParams { analysis_id: id, explain: true });
             }
         }
         Err(e) => tracing::error!("could not list unfinished analyses: {e}"),
@@ -235,4 +235,32 @@ pub async fn resume_unfinished(state: &AppState) {
 /// Snapshot for a newly connected listener.
 pub async fn snapshot(state: &AppState, id: &str) -> Result<GameAnalysis, db::DbError> {
     state.db.analysis(id).await
+}
+
+/// Wait until an analysis finishes (or `timeout` passes) and return it.
+pub async fn wait_done(state: &AppState, id: &str, timeout: std::time::Duration) -> Result<GameAnalysis, String> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
+        let rx = state.jobs.get(id).map(|h| h.tx.subscribe());
+        let a = state.db.analysis(id).await.map_err(|e| e.to_string())?;
+        if a.status.is_finished() {
+            return Ok(a);
+        }
+        let Some(mut rx) = rx else {
+            // Not running in this process (yet): poll briefly.
+            if tokio::time::Instant::now() >= deadline {
+                return Ok(a);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            continue;
+        };
+        loop {
+            match tokio::time::timeout_at(deadline, rx.recv()).await {
+                Err(_) => return state.db.analysis(id).await.map_err(|e| e.to_string()),
+                Ok(Ok(JobEvent::Done { analysis })) => return Ok(analysis),
+                Ok(Ok(_)) | Ok(Err(broadcast::error::RecvError::Lagged(_))) => {}
+                Ok(Err(broadcast::error::RecvError::Closed)) => break,
+            }
+        }
+    }
 }

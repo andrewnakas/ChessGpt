@@ -2,21 +2,33 @@ use std::time::Instant;
 
 use api_types::{Meta, Provider, ProviderInput, ProviderTestResult, Settings, SettingsInput};
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::Path;
 use axum::http::StatusCode;
 
 use crate::error::{ApiResult, AppError};
+use crate::auth::UserState;
 use crate::state::AppState;
 
-pub async fn get(State(state): State<AppState>) -> ApiResult<Json<Settings>> {
+pub async fn get(UserState(state, _): UserState) -> ApiResult<Json<Settings>> {
     Ok(Json(state.db.settings().await?))
 }
 
-pub async fn put(State(state): State<AppState>, Json(s): Json<SettingsInput>) -> ApiResult<Json<Settings>> {
+pub async fn put(UserState(state, _): UserState, Json(s): Json<SettingsInput>) -> ApiResult<Json<Settings>> {
     Ok(Json(state.db.put_settings(&s).await?))
 }
 
-pub async fn providers(State(state): State<AppState>) -> ApiResult<Json<Vec<Provider>>> {
+fn user_providers(state: &AppState) -> ApiResult<()> {
+    if state.user_providers_allowed() {
+        Ok(())
+    } else {
+        Err(AppError(StatusCode::FORBIDDEN, "This site provides the AI coach; no keys are needed.".into()))
+    }
+}
+
+pub async fn providers(UserState(state, _): UserState) -> ApiResult<Json<Vec<Provider>>> {
+    if !state.user_providers_allowed() {
+        return Ok(Json(vec![]));
+    }
     Ok(Json(state.db.list_providers().await?))
 }
 
@@ -33,27 +45,31 @@ fn check(input: &ProviderInput, has_stored_key: bool) -> ApiResult<()> {
     Ok(())
 }
 
-pub async fn create_provider(State(state): State<AppState>, Json(i): Json<ProviderInput>) -> ApiResult<Json<Provider>> {
+pub async fn create_provider(UserState(state, _): UserState, Json(i): Json<ProviderInput>) -> ApiResult<Json<Provider>> {
+    user_providers(&state)?;
     check(&i, false)?;
     Ok(Json(state.db.create_provider(&i).await?))
 }
 
 pub async fn update_provider(
-    State(state): State<AppState>,
+    UserState(state, _): UserState,
     Path(id): Path<String>,
     Json(i): Json<ProviderInput>,
 ) -> ApiResult<Json<Provider>> {
+    user_providers(&state)?;
     let existing = state.db.provider(&id).await?;
     check(&i, existing.api_key.is_some() && i.api_key.as_deref() != Some(""))?;
     Ok(Json(state.db.update_provider(&id, &i).await?))
 }
 
-pub async fn delete_provider(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<StatusCode> {
+pub async fn delete_provider(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<StatusCode> {
+    user_providers(&state)?;
     state.db.delete_provider(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn test_provider(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<ProviderTestResult>> {
+pub async fn test_provider(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<Json<ProviderTestResult>> {
+    user_providers(&state)?;
     let rec = state.db.provider(&id).await?;
     let started = Instant::now();
     let p = llm::build(llm::ProviderConfig {
@@ -73,7 +89,7 @@ pub async fn test_provider(State(state): State<AppState>, Path(id): Path<String>
     }))
 }
 
-pub async fn meta(State(state): State<AppState>) -> ApiResult<Json<Meta>> {
+pub async fn meta(UserState(state, _): UserState) -> ApiResult<Json<Meta>> {
     let cfg = state.pool.config();
     Ok(Json(Meta {
         version: env!("CARGO_PKG_VERSION").into(),
@@ -81,6 +97,31 @@ pub async fn meta(State(state): State<AppState>) -> ApiResult<Json<Meta>> {
         engine_threads: cfg.threads,
         engine_workers: cfg.workers as u32,
         mode: state.config.mode.clone(),
-        has_provider: state.db.default_provider().await?.is_some(),
+        has_provider: state.managed.is_some() || state.db.default_provider().await?.is_some(),
+        managed_provider: state.managed.is_some(),
+        provider_label: state.managed.as_ref().map(|m| m.label()),
+        budget_used: state
+            .managed
+            .as_ref()
+            .and_then(|m| m.daily_tokens)
+            .map(|limit| (state.budget.used() as f64 / limit as f64).min(1.0)),
     }))
+}
+
+#[derive(serde::Serialize)]
+pub struct Connection {
+    client_id: String,
+    name: String,
+    last_used: i64,
+}
+
+/// Apps (Claude, ChatGPT, ...) connected to this account through OAuth.
+pub async fn connections(UserState(state, _): UserState) -> ApiResult<Json<Vec<Connection>>> {
+    let rows = state.db.connected_clients().await?;
+    Ok(Json(rows.into_iter().map(|(client_id, name, last_used)| Connection { client_id, name, last_used }).collect()))
+}
+
+pub async fn disconnect(UserState(state, _): UserState, Path(client_id): Path<String>) -> ApiResult<StatusCode> {
+    state.db.disconnect_client(&client_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

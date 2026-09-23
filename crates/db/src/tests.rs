@@ -251,3 +251,62 @@ async fn keyring_persists_across_opens() {
     let db2 = Db::open(dir.path()).await.unwrap();
     assert_eq!(db2.provider(&p.id).await.unwrap().api_key.as_deref(), Some("sk-openai"));
 }
+
+#[tokio::test]
+async fn accounts_sessions_and_isolation() {
+    let db = Db::open_memory().await.unwrap();
+    let a = db.register("Ann@Example.com", "correct horse", None).await.unwrap();
+    assert_eq!(a.email.as_deref(), Some("ann@example.com"));
+    assert!(db.register("ann@example.com", "another pass", None).await.is_err());
+    assert!(db.register("bob@example.com", "short", None).await.is_err());
+    assert!(db.verify_login("ann@example.com", "wrong pass").await.is_err());
+    assert_eq!(db.verify_login("ANN@example.com", "correct horse").await.unwrap().id, a.id);
+    let t = db.create_session(&a.id).await.unwrap();
+    assert_eq!(db.session_user(&t).await.unwrap().unwrap().id, a.id);
+    db.delete_session(&t).await.unwrap();
+    assert!(db.session_user(&t).await.unwrap().is_none());
+
+    // Ann's games are invisible to Bob; sharing lets Bob copy one.
+    let ann = db.for_user(&a.id);
+    let g = opera(&ann).await;
+    let b = db.register("bob@example.com", "password1", Some("Bob")).await.unwrap();
+    let bob = db.for_user(&b.id);
+    assert!(bob.list_games(10, 0).await.unwrap().is_empty());
+    assert!(bob.game(&g.id).await.is_err());
+    let share = ann.share_token(&g.id).await.unwrap();
+    assert_eq!(ann.share_token(&g.id).await.unwrap(), share, "stable");
+    assert_eq!(db.shared_game(&share).await.unwrap(), (a.id.clone(), g.id.clone()));
+    let copy = bob.claim_shared(&share).await.unwrap();
+    assert_ne!(copy, g.id);
+    assert_eq!(bob.list_games(10, 0).await.unwrap().len(), 1);
+
+    // Lichess login creates once, then finds the same account.
+    let l1 = db.lichess_login("drnykterstein", "DrNykterstein", "lip_abc").await.unwrap();
+    let l2 = db.lichess_login("drnykterstein", "DrNykterstein", "lip_def").await.unwrap();
+    assert_eq!(l1.id, l2.id);
+    assert_eq!(db.for_user(&l1.id).lichess_token().await.unwrap().as_deref(), Some("lip_def"));
+}
+
+#[tokio::test]
+async fn oauth_code_and_token_lifecycle() {
+    let db = Db::open_memory().await.unwrap();
+    let u = db.register("c@example.com", "password1", None).await.unwrap();
+    db.register_client("cid", "Claude", &["https://claude.ai/api/mcp/auth_callback".into()], &serde_json::json!({}))
+        .await
+        .unwrap();
+    let code = db.create_code("cid", &u.id, "https://claude.ai/api/mcp/auth_callback", "chal", Some("https://x/mcp"), "chess")
+        .await
+        .unwrap();
+    let (g, redirect, chal) = db.take_code(&code).await.unwrap().unwrap();
+    assert_eq!((redirect.as_str(), chal.as_str()), ("https://claude.ai/api/mcp/auth_callback", "chal"));
+    assert!(db.take_code(&code).await.unwrap().is_none(), "codes are single use");
+    let t = db.issue_tokens(&g).await.unwrap();
+    assert_eq!(db.access_grant(&t.access_token).await.unwrap().unwrap().user_id, u.id);
+    assert!(db.access_grant(&t.refresh_token).await.unwrap().is_none(), "refresh token is not an access token");
+    assert!(db.refresh(&t.refresh_token, "other").await.unwrap().is_none());
+    let t2 = db.refresh(&t.refresh_token, "cid").await.unwrap().unwrap();
+    assert!(db.refresh(&t.refresh_token, "cid").await.unwrap().is_none(), "rotated");
+    assert_eq!(db.for_user(&u.id).connected_clients().await.unwrap().len(), 1);
+    db.for_user(&u.id).disconnect_client("cid").await.unwrap();
+    assert!(db.access_grant(&t2.access_token).await.unwrap().is_none());
+}

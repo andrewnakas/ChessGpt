@@ -5,7 +5,7 @@ use api_types::{
     ImportRequest, ImportResponse, JobEvent, JobStatus, Side,
 };
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use chess_core::pgn::{ParsedGame, parse_pgn, parse_pgn_many};
@@ -22,6 +22,7 @@ use tokio_util::sync::CancellationToken;
 use crate::error::{ApiResult, AppError};
 use crate::jobs::{self, JobParams};
 use crate::routes::engine::async_stream;
+use crate::auth::UserState;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -30,11 +31,11 @@ pub struct Paging {
     offset: Option<u32>,
 }
 
-pub async fn list(State(state): State<AppState>, Query(p): Query<Paging>) -> ApiResult<Json<Vec<GameSummary>>> {
+pub async fn list(UserState(state, _): UserState, Query(p): Query<Paging>) -> ApiResult<Json<Vec<GameSummary>>> {
     Ok(Json(state.db.list_games(p.limit.unwrap_or(100).min(500), p.offset.unwrap_or(0)).await?))
 }
 
-pub async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<GameDetail>> {
+pub async fn detail(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<Json<GameDetail>> {
     let g = state.db.game(&id).await?;
     let analysis = state.db.latest_analysis(&id).await?;
     Ok(Json(GameDetail {
@@ -46,7 +47,7 @@ pub async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> Ap
     }))
 }
 
-pub async fn delete(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<StatusCode> {
+pub async fn delete(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<StatusCode> {
     state.db.delete_game(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -57,7 +58,7 @@ pub struct SideBody {
 }
 
 pub async fn set_side(
-    State(state): State<AppState>,
+    UserState(state, _): UserState,
     Path(id): Path<String>,
     Json(b): Json<SideBody>,
 ) -> ApiResult<Json<GameSummary>> {
@@ -77,7 +78,7 @@ fn movetext_hash(g: &ParsedGame) -> String {
     h.finalize().iter().take(12).map(|b| format!("{b:02x}")).collect()
 }
 
-async fn store(
+pub(crate) async fn store(
     state: &AppState,
     source: GameSource,
     source_id: Option<String>,
@@ -100,7 +101,7 @@ async fn store(
     }
 }
 
-pub async fn import(State(state): State<AppState>, Json(req): Json<ImportRequest>) -> ApiResult<Json<ImportResponse>> {
+pub async fn import(UserState(state, _): UserState, Json(req): Json<ImportRequest>) -> ApiResult<Json<ImportResponse>> {
     let mut out = ImportResponse { games: vec![], duplicates: 0, errors: vec![] };
     match req {
         ImportRequest::Pgn { pgn } => {
@@ -142,10 +143,19 @@ pub async fn import(State(state): State<AppState>, Json(req): Json<ImportRequest
 }
 
 pub async fn analyse(
-    State(state): State<AppState>,
+    UserState(state, _): UserState,
     Path(game_id): Path<String>,
     Json(req): Json<AnalyseGameRequest>,
 ) -> ApiResult<Json<AnalyseGameResponse>> {
+    Ok(Json(start_analysis(&state, game_id, &req).await?))
+}
+
+/// Start (or reuse) an analysis of one of the user's games.
+pub(crate) async fn start_analysis(
+    state: &AppState,
+    game_id: String,
+    req: &AnalyseGameRequest,
+) -> ApiResult<AnalyseGameResponse> {
     let game = state.db.game_summary(&game_id).await?;
     if game.ply_count == 0 {
         return Err(AppError::bad_request("this game has no moves; open it on the board to analyse the position"));
@@ -157,7 +167,7 @@ pub async fn analyse(
         if a.status == JobStatus::Queued && state.jobs.get(&a.id).is_none() {
             jobs::spawn(state.clone(), JobParams { analysis_id: a.id.clone(), explain: req.explain });
         }
-        return Ok(Json(AnalyseGameResponse { analysis_id: a.id, status: a.status }));
+        return Ok(AnalyseGameResponse { analysis_id: a.id, status: a.status });
     }
     let settings = state.db.settings().await?;
     let elo = req.elo.unwrap_or(settings.elo).clamp(100, 3500);
@@ -176,14 +186,15 @@ pub async fn analyse(
         })
         .await?;
     jobs::spawn(state.clone(), JobParams { analysis_id: id.clone(), explain: req.explain });
-    Ok(Json(AnalyseGameResponse { analysis_id: id, status: JobStatus::Queued }))
+    Ok(AnalyseGameResponse { analysis_id: id, status: JobStatus::Queued })
 }
 
-pub async fn get_analysis(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<GameAnalysis>> {
+pub async fn get_analysis(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<Json<GameAnalysis>> {
     Ok(Json(state.db.analysis(&id).await?))
 }
 
-pub async fn cancel(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<StatusCode> {
+pub async fn cancel(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<StatusCode> {
+    state.db.analysis(&id).await?; // ownership check
     match state.jobs.get(&id) {
         Some(h) => {
             h.cancel.cancel();
@@ -200,7 +211,7 @@ fn ev(e: &JobEvent) -> Result<Event, Infallible> {
 /// Server-sent events for an analysis: a snapshot first, then live updates
 /// until the job finishes.
 pub async fn events(
-    State(state): State<AppState>,
+    UserState(state, _): UserState,
     Path(id): Path<String>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     // Subscribe before reading the snapshot so no event falls in between.
@@ -246,7 +257,7 @@ pub async fn events(
 
 /// Explain any single move on demand (not only key moments).
 pub async fn explain_ply(
-    State(state): State<AppState>,
+    UserState(state, _): UserState,
     Path((id, ply)): Path<(String, u32)>,
 ) -> ApiResult<Json<Explanation>> {
     let a = state.db.analysis(&id).await?;
@@ -280,4 +291,30 @@ pub async fn explain_ply(
         )
         .await?;
     Ok(Json(x.explanation))
+}
+
+/// Create (or return) the public share link token for a game.
+pub async fn share(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<Json<serde_json::Value>> {
+    let token = state.db.share_token(&id).await?;
+    Ok(Json(serde_json::json!({ "token": token, "path": format!("/share/{token}") })))
+}
+
+/// Read-only view of a shared game. No sign-in needed.
+pub async fn shared(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Path(token): Path<String>,
+) -> ApiResult<Json<GameDetail>> {
+    let (owner, id) = state.db.shared_game(&token).await?;
+    let db = state.db.for_user(&owner);
+    let g = db.game(&id).await?;
+    let analysis = db.latest_analysis(&id).await?;
+    let mut summary = g.summary;
+    summary.source_id = None;
+    Ok(Json(GameDetail { start_fen: g.parsed.start_fen.clone(), moves: g.parsed.moves.clone(), summary, pgn: g.pgn, analysis }))
+}
+
+/// Copy a shared game into the signed-in user's library.
+pub async fn claim(UserState(state, _): UserState, Path(token): Path<String>) -> ApiResult<Json<serde_json::Value>> {
+    let id = state.db.claim_shared(&token).await?;
+    Ok(Json(serde_json::json!({ "game_id": id })))
 }

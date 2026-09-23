@@ -1,8 +1,10 @@
 //! SQLite persistence (sqlx). Single local user by default; every table is
 //! keyed by user so hosted multi-user mode is a later addition, not a rewrite.
 
+mod accounts;
 mod analysis;
 mod chat;
+mod oauth;
 mod games;
 mod keyring;
 mod providers;
@@ -15,7 +17,13 @@ use std::time::Duration;
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
+pub use accounts::{Account, hash_token, random_token};
+
+pub fn accounts_session_seconds() -> i64 {
+    accounts::SESSION_DAYS * 86_400
+}
 pub use analysis::NewAnalysis;
+pub use oauth::{OAuthClient, OAuthGrant};
 pub use games::{GameRecord, NewGame};
 pub use keyring::KeyRing;
 pub use providers::ProviderRecord;
@@ -110,6 +118,16 @@ impl Db {
 
     pub fn user_id(&self) -> &str {
         &self.user_id
+    }
+
+    /// The same database, scoped to another user. Every per-user query goes
+    /// through `self.user_id`, so this is how requests are isolated.
+    pub fn for_user(&self, user_id: &str) -> Db {
+        Db { pool: self.pool.clone(), keyring: self.keyring.clone(), user_id: user_id.to_string() }
+    }
+
+    pub fn keyring(&self) -> &KeyRing {
+        &self.keyring
     }
 }
 

@@ -1,0 +1,11 @@
+{
+  "name": "chessgpt",
+  "displayName": "chessgpt chess coach",
+  "version": "0.1.0",
+  "description": "Stockfish analysis, move-checked lines and your chessgpt game library, with a coaching skill that explains games at your rating.",
+  "author": { "name": "chessgpt", "url": "https://chessgpt.com" },
+  "homepage": "https://chessgpt.com/connect",
+  "repository": "https://github.com/chessgpt/chessgpt",
+  "license": "AGPL-3.0-only",
+  "keywords": ["chess", "stockfish", "coach", "lichess", "chess.com"]
+}

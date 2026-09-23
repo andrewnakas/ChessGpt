@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 
 use api_types::{EngineAnalysis, EngineEvent, LineDto};
-use axum::extract::{Query, State};
+use axum::extract::Query;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use chess_core::position::{parse_fen, pv_to_san};
 use engine::{Analysis, AnalysisRequest, Limit, Priority};
@@ -9,7 +9,7 @@ use futures::Stream;
 use serde::Deserialize;
 
 use crate::error::ApiResult;
-use crate::state::AppState;
+use crate::auth::UserState;
 
 #[derive(Deserialize)]
 pub struct AnalyseQuery {
@@ -52,7 +52,7 @@ fn event(e: &EngineEvent) -> Result<Event, Infallible> {
 /// Live analysis of one position, streamed as it deepens. Closing the stream
 /// stops the search.
 pub async fn analyse(
-    State(state): State<AppState>,
+    UserState(state, _): UserState,
     Query(q): Query<AnalyseQuery>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {
     let limit = Limit {

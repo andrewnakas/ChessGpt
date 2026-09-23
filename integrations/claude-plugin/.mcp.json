@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "chessgpt": {
+      "type": "http",
+      "url": "https://chessgpt.com/mcp"
+    }
+  }
+}

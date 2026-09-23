@@ -1,0 +1,11 @@
+{
+  "name": "chessgpt",
+  "owner": { "name": "chessgpt", "url": "https://chessgpt.com" },
+  "plugins": [
+    {
+      "name": "chessgpt",
+      "description": "Stockfish-grounded chess coaching and your chessgpt game library.",
+      "source": { "type": "relative-path", "path": "./integrations/claude-plugin" }
+    }
+  ]
+}

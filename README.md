@@ -14,8 +14,14 @@ Every move the model mentions is checked against the engine before you see it.
   lines to check them, reads the opening explorer, and looks up your game.
 - **No hallucinated moves** – illegal or invented moves trigger a correction round, then
   are stripped; lines are replaced with the engine's. Each answer shows whether it was verified.
-- **Bring your own model** – Claude, OpenAI, OpenRouter, or a local model through Ollama,
-  LM Studio, llama.cpp or any OpenAI-compatible server.
+- **Inside Claude and ChatGPT** – people add `https://chessgpt.com/mcp` as a connector and use
+  chessgpt from the assistant they already pay for: Stockfish, move checking, their library and
+  an interactive board, no API key. Every result links back to the site. See
+  [docs/integrations.md](docs/integrations.md).
+- **No user keys on the site** – the site operator sets one model key (with a daily budget), or
+  in local mode you can use Claude, OpenAI, OpenRouter, Ollama or any OpenAI-compatible server.
+- **Accounts** – email and password or Sign in with Lichess (which also imports your Lichess
+  games), share links for any game.
 
 ## Run it
 
@@ -27,7 +33,8 @@ cargo xtask build     # one release binary with the web UI embedded
 ./target/release/chessgpt
 ```
 
-Open http://localhost:8080, add an AI provider under **Settings**, import a game.
+Open http://localhost:8080 and import a game. For the coach, start the server with
+`ANTHROPIC_API_KEY` set (or add a provider under **Settings** in local mode).
 
 For development, `cargo xtask dev` runs the API on :8080 and the Vite dev server on :5173.
 If you have `just`, the `justfile` wraps the same commands.
@@ -42,9 +49,10 @@ All optional; see `.env.example`.
 | `CHESSGPT_DATA_DIR` | `%LOCALAPPDATA%\chessgpt` / `~/.local/share/chessgpt` | database and key file |
 | `STOCKFISH_PATH` | `engines/…` | Stockfish binary |
 | `ENGINE_WORKERS`, `ENGINE_THREADS`, `ENGINE_HASH_MB` | from CPU count | engine pool size |
-| `CHESSGPT_MODE` | `local` | `hosted` requires a login |
-| `CHESSGPT_AUTH_PASSWORD` | | shared password in hosted mode |
-| `CHESSGPT_PUBLIC_URL` | | e.g. `https://chessgpt.com` (enables secure cookies) |
+| `CHESSGPT_MODE` | `local` | `hosted` turns on accounts, OAuth and the connector |
+| `CHESSGPT_PUBLIC_URL` | | e.g. `https://chessgpt.com`; required for the connector |
+| `ANTHROPIC_API_KEY` or `CHESSGPT_LLM_*` | | the site's own model; hides key settings from users |
+| `CHESSGPT_LLM_DAILY_TOKENS` | unlimited | daily token cap for the site's model |
 
 API keys are stored encrypted with a per-install key (`keyring.key` in the data directory).
 
@@ -52,8 +60,9 @@ API keys are stored encrypted with a per-install key (`keyring.key` in the data 
 
 Since August 2026 Lichess only serves a player's game list and the opening explorer to
 signed-in API clients ([lichess-org/api#667](https://github.com/lichess-org/api/issues/667)).
-Create a personal token with no scopes at https://lichess.org/account/oauth/token and paste
-it in Settings. Single games import by link without a token.
+Signing in to chessgpt with Lichess covers both. In local mode, paste a personal token (no
+scopes) from https://lichess.org/account/oauth/token in Settings. Single games import by link
+without a token.
 
 ## Deploy
 
@@ -62,7 +71,7 @@ Caddyfile with automatic HTTPS, and a compose file:
 
 ```sh
 cd deploy
-CHESSGPT_AUTH_PASSWORD=... docker compose up -d --build
+ANTHROPIC_API_KEY=... CHESSGPT_LLM_DAILY_TOKENS=5000000 docker compose up -d --build
 ```
 
 ## Layout

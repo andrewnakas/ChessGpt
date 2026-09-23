@@ -322,10 +322,15 @@ impl Db {
     }
 
     /// Analyses left queued/running by a previous process.
-    pub async fn unfinished_analyses(&self) -> Result<Vec<String>> {
-        Ok(sqlx::query_scalar("SELECT id FROM game_analyses WHERE status IN ('queued', 'running') ORDER BY created_at")
-            .fetch_all(&self.pool)
-            .await?)
+    /// (analysis id, owner) of analyses a previous process left unfinished.
+    pub async fn unfinished_analyses(&self) -> Result<Vec<(String, String)>> {
+        let rows = sqlx::query(
+            "SELECT a.id, g.user_id FROM game_analyses a JOIN games g ON g.id = a.game_id
+             WHERE a.status IN ('queued', 'running') ORDER BY a.created_at",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(|r| Ok((r.try_get("id")?, r.try_get("user_id")?))).collect()
     }
 
     /// Record the player's errors in the mistake index (untagged).
@@ -426,5 +431,19 @@ impl Db {
         rows.iter()
             .map(|r| Ok((r.try_get("concept_tag")?, r.try_get("n")?)))
             .collect()
+    }
+}
+
+impl Db {
+    /// Count of the user's indexed mistakes per game phase.
+    pub async fn mistake_counts_by_phase(&self) -> Result<Vec<(String, i64)>> {
+        let rows = sqlx::query(
+            "SELECT phase, COUNT(DISTINCT analysis_id || ':' || ply) AS n FROM mistake_index WHERE user_id = ?
+             GROUP BY phase ORDER BY n DESC",
+        )
+        .bind(&self.user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(|r| Ok((r.try_get("phase")?, r.try_get("n")?))).collect()
     }
 }

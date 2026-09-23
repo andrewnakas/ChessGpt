@@ -19,6 +19,7 @@ db.workspace = true
 axum.workspace = true
 tower-http.workspace = true
 tokio.workspace = true
+async-trait.workspace = true
 tokio-util.workspace = true
 tokio-stream.workspace = true
 futures.workspace = true
@@ -31,8 +32,12 @@ rust-embed.workspace = true
 mime_guess.workspace = true
 sha2 = "0.10"
 rand = "0.9"
+base64 = "0.22"
+reqwest.workspace = true
+tower = "0.5"
+rmcp = { version = "3.4", features = ["server", "macros", "schemars", "transport-streamable-http-server"] }
+schemars.workspace = true
 shakmaty.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
-reqwest.workspace = true

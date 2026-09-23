@@ -78,7 +78,9 @@
       analysis = g.analysis;
       if (analysis && (analysis.status === 'queued' || analysis.status === 'running')) listen(analysis.id);
       const firstKey = analysis?.key_moments[0];
-      if (analysis?.status === 'done' && firstKey) ply = firstKey;
+      const linked = parseInt(page.url.searchParams.get('ply') ?? '', 10);
+      if (linked > 0 && linked <= g.moves.length) ply = linked;
+      else if (analysis?.status === 'done' && firstKey) ply = firstKey;
     } catch (e) {
       loadError = (e as Error).message;
     }
@@ -342,6 +344,20 @@
     future = played.slice(1);
   }
 
+  let shareMsg = $state<string | null>(null);
+  async function shareGame() {
+    if (!game) return;
+    const r = await api.share(game.summary.id);
+    const url = `${location.origin}${r.path}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      shareMsg = 'Link copied';
+    } catch {
+      shareMsg = url;
+    }
+    setTimeout(() => (shareMsg = null), 3000);
+  }
+
   async function explainNow() {
     if (!analysis || !currentMove) return;
     const p = currentMove.ply;
@@ -512,6 +528,7 @@
           <div class="done muted small">
             Analysed for {analysis.elo} ({analysis.tier}) with {analysis.engine}.
             <button class="ghost small" onclick={() => startAnalysis(true)}>Re-run</button>
+            <button class="ghost small" onclick={shareGame}>{shareMsg ?? 'Share link'}</button>
           </div>
         {/if}
         {#if jobError}<p class="error small">{jobError}</p>{/if}

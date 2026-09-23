@@ -1,9 +1,9 @@
 <script lang="ts">
   import { getContext, onMount } from 'svelte';
   import { api } from '$lib/api/client';
-  import type { Provider, ProviderKind, ProviderTestResult, Settings } from '$lib/api/types';
+  import type { Meta, Provider, ProviderKind, ProviderTestResult, Settings } from '$lib/api/types';
 
-  const app = getContext<{ refresh: () => Promise<void> }>('app');
+  const app = getContext<{ refresh: () => Promise<void>; meta: Meta | null }>('app');
 
   let settings = $state<Settings | null>(null);
   let lichessToken = $state('');
@@ -148,7 +148,14 @@
   </section>
 
   <section class="card pad">
-    <h2>AI providers</h2>
+    <h2>AI coach</h2>
+    {#if app.meta?.managed_provider}
+      <p>This site provides the AI coach: <b>{app.meta.provider_label}</b>. You don't need a key.</p>
+      {#if app.meta.budget_used != null}
+        <p class="muted small">Today's shared coach budget used: {Math.round(app.meta.budget_used * 100)}%.</p>
+      {/if}
+      <p class="muted small">You can also use chessgpt from your own Claude or ChatGPT: <a href="/connect">connect it</a>.</p>
+    {:else}
     <p class="muted small">
       The coach needs a language model. Your key stays on this server, encrypted, and is only sent to the provider you choose.
     </p>
@@ -197,6 +204,7 @@
       {#if providerError}<p class="error">{providerError}</p>{/if}
       <div><button class="primary" type="submit">Add provider</button></div>
     </form>
+    {/if}
   </section>
 </div>
 

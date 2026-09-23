@@ -494,6 +494,12 @@ pub struct Meta {
     pub engine_workers: u32,
     pub mode: String,
     pub has_provider: bool,
+    /// The site operator supplies the AI model; users never configure keys.
+    pub managed_provider: bool,
+    /// e.g. "Claude (claude-opus-5)" when managed.
+    pub provider_label: Option<String>,
+    /// Today's share of the site's AI budget already used, 0..1, when capped.
+    pub budget_used: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

@@ -5,7 +5,7 @@ use api_types::{
     SendMessageRequest,
 };
 use axum::Json;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, KeepAlive, Sse};
 use coach::chat::{TurnInput, run_turn};
@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 
 use crate::error::{ApiResult, AppError};
 use crate::routes::engine::async_stream;
+use crate::auth::UserState;
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -24,11 +25,11 @@ pub struct ThreadQuery {
     game_id: Option<String>,
 }
 
-pub async fn list(State(state): State<AppState>, Query(q): Query<ThreadQuery>) -> ApiResult<Json<Vec<ChatThread>>> {
+pub async fn list(UserState(state, _): UserState, Query(q): Query<ThreadQuery>) -> ApiResult<Json<Vec<ChatThread>>> {
     Ok(Json(state.db.list_threads(q.game_id.as_deref()).await?))
 }
 
-pub async fn create(State(state): State<AppState>, Json(r): Json<CreateThreadRequest>) -> ApiResult<Json<ChatThread>> {
+pub async fn create(UserState(state, _): UserState, Json(r): Json<CreateThreadRequest>) -> ApiResult<Json<ChatThread>> {
     if let Some(g) = &r.game_id {
         state.db.game_summary(g).await?;
     }
@@ -36,11 +37,11 @@ pub async fn create(State(state): State<AppState>, Json(r): Json<CreateThreadReq
     Ok(Json(state.db.create_thread(r.game_id.as_deref(), &title).await?))
 }
 
-pub async fn detail(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<ChatThreadDetail>> {
+pub async fn detail(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<Json<ChatThreadDetail>> {
     Ok(Json(state.db.thread_detail(&id).await?))
 }
 
-pub async fn delete(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<StatusCode> {
+pub async fn delete(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<StatusCode> {
     state.db.delete_thread(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -87,7 +88,7 @@ fn ev(e: &ChatEvent) -> Result<Event, Infallible> {
 /// Ask the coach. Streams tokens, tool calls, the verification report, and
 /// finally the stored assistant message.
 pub async fn send(
-    State(state): State<AppState>,
+    UserState(state, _): UserState,
     Path(thread_id): Path<String>,
     Json(req): Json<SendMessageRequest>,
 ) -> ApiResult<Sse<impl Stream<Item = Result<Event, Infallible>>>> {

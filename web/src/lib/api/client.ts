@@ -25,6 +25,20 @@ import type {
   Side
 } from './types';
 
+export interface Account {
+  id: string;
+  display_name: string;
+  email: string | null;
+  lichess_username: string | null;
+  kind: string;
+}
+
+export interface SessionInfo {
+  accounts: boolean;
+  account: Account | null;
+  lichess_login: boolean;
+}
+
 export class HttpError extends Error {
   constructor(
     public status: number,
@@ -59,8 +73,16 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const api = {
   meta: () => request<Meta>('GET', '/meta'),
-  session: () => request<{ required: boolean; authenticated: boolean }>('GET', '/session'),
-  login: (password: string) => request<void>('POST', '/login', { password }),
+  session: () => request<SessionInfo>('GET', '/session'),
+  register: (email: string, password: string, name?: string) =>
+    request<Account>('POST', '/auth/register', { email, password, name: name ?? null }),
+  login: (email: string, password: string) => request<Account>('POST', '/auth/login', { email, password }),
+  logout: () => request<void>('POST', '/auth/logout'),
+  share: (gameId: string) => request<{ token: string; path: string }>('POST', `/games/${gameId}/share`),
+  shared: (token: string) => request<GameDetail>('GET', `/share/${token}`),
+  claim: (token: string) => request<{ game_id: string }>('POST', `/share/${token}/claim`),
+  connections: () => request<{ client_id: string; name: string; last_used: number }[]>('GET', '/connections'),
+  disconnect: (clientId: string) => request<void>('DELETE', `/connections/${encodeURIComponent(clientId)}`),
 
   games: (limit = 200) => request<GameSummary[]>('GET', `/games?limit=${limit}`),
   game: (id: string) => request<GameDetail>('GET', `/games/${id}`),

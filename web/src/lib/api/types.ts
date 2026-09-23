@@ -182,7 +182,19 @@ export type SettingsInput = { elo: number, lichess_username: string | null, ches
  */
 lichess_token: string | null, };
 
-export type Meta = { version: string, engine: string, engine_threads: number, engine_workers: number, mode: string, has_provider: boolean, };
+export type Meta = { version: string, engine: string, engine_threads: number, engine_workers: number, mode: string, has_provider: boolean, 
+/**
+ * The site operator supplies the AI model; users never configure keys.
+ */
+managed_provider: boolean, 
+/**
+ * e.g. "Claude (claude-opus-5)" when managed.
+ */
+provider_label: string | null, 
+/**
+ * Today's share of the site's AI budget already used, 0..1, when capped.
+ */
+budget_used: number | null, };
 
 export type ApiError = { error: string, };
 

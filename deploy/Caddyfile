@@ -1,0 +1,7 @@
+{$CHESSGPT_DOMAIN:chessgpt.com} {
+	encode zstd gzip
+	reverse_proxy chessgpt:8080 {
+		# stream server-sent events (engine lines, analysis progress, chat) immediately
+		flush_interval -1
+	}
+}

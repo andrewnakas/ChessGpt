@@ -1,0 +1,33 @@
+services:
+  chessgpt:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    environment:
+      CHESSGPT_MODE: hosted
+      CHESSGPT_AUTH_PASSWORD: ${CHESSGPT_AUTH_PASSWORD:?set a password}
+      CHESSGPT_PUBLIC_URL: https://${CHESSGPT_DOMAIN:-chessgpt.com}
+      ENGINE_WORKERS: ${ENGINE_WORKERS:-2}
+      ENGINE_THREADS: ${ENGINE_THREADS:-2}
+    volumes:
+      - chessgpt-data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      CHESSGPT_DOMAIN: ${CHESSGPT_DOMAIN:-chessgpt.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - chessgpt
+
+volumes:
+  chessgpt-data:
+  caddy-data:

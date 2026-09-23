@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rust:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUST_MIN_STACK: "16777216"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.98
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo xtask fetch-stockfish
+      - run: cargo xtask gen-types --check
+      - run: cargo test --workspace --locked
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [rust, web]
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f deploy/Dockerfile -t chessgpt .
+      - run: |
+          docker run -d --name cg -p 8080:8080 -e CHESSGPT_MODE=local chessgpt
+          for i in $(seq 1 30); do curl -fsS localhost:8080/api/health && break; sleep 1; done
+          curl -fsS localhost:8080/api/meta
+          docker logs cg

@@ -1,0 +1,33 @@
+---
+source: crates/coach/tests/llm_flows.rs
+expression: "prompts::explain_moment(&ctx, &m, &mc)"
+---
+MOMENT
+Move 9... b5 by Black (the student): b5, classified as a blunder.
+Position before the move (FEN): rn2kb1r/pp2qppp/2p2n2/4p1B1/2B1P3/1QN5/PPP2PPP/R3K2R b KQkq - 1 9
+Evaluation before: +2.10 (White's winning chances 70%)
+Evaluation after: +5.20 (White's winning chances 94%)
+Black's winning chances changed by -24 percentage points.
+
+ENGINE LINES before the move (best first):
+1. [+2.10] 9... Na6 10. O-O-O Nc5
+2. [+2.60] 9... h6 10. Bxf6 Qxf6
+
+REFUTATION, the opponent's best reply after b5:
+[+5.20] 10. Nxb5 cxb5 11. Bxb5+ Nbd7
+
+FACTS before the move:
+- material is level
+- captures available to Black: Nxe4
+- phase: middlegame
+
+FACTS after the move:
+- material is level
+- White has loose/attacked pieces: bishop on c4
+- checks available to White: Bxf7+
+- captures available to White: Nxb5, Bxb5, Bxf7+, Bxf6, Qxb5
+- phase: middlegame
+
+LEGAL MOVES before the move: c5, a6, b6, g6, h6, a5, b5, h5, Nxe4, Ng4, Nd5, Nh5, Nfd7, Ng8, Na6, Nbd7, Rg8, Qa3, Qb4, Qc5, Qd6, Qe6, Qc7, Qd7, Qd8, Kd7, Kd8
+
+Explain this moment.

@@ -162,7 +162,7 @@ impl Findings {
         } else {
             VerificationStatus::Ok
         };
-        Verification { status, issues, unverified_moves: self.unverified.clone() }
+        Verification { status, issues, unverified_moves: self.unverified.clone(), rejected_moves: self.hard.clone() }
     }
 }
 

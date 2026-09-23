@@ -4,4 +4,35 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "chessgpt"
+path = "src/main.rs"
+
 [dependencies]
+api-types.workspace = true
+chess-core.workspace = true
+engine.workspace = true
+llm.workspace = true
+coach.workspace = true
+importers.workspace = true
+db.workspace = true
+axum.workspace = true
+tower-http.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tokio-stream.workspace = true
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+rust-embed.workspace = true
+mime_guess.workspace = true
+sha2 = "0.10"
+rand = "0.9"
+shakmaty.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+reqwest.workspace = true

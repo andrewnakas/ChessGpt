@@ -137,7 +137,7 @@ async fn review_strips_unbacked_moves() {
         concept_tags: vec!["development".into()],
         takeaway: "develop".into(),
         mentioned_moves: vec!["b5".into(), "Nxb5".into()],
-        verification: api_types::Verification { status: VerificationStatus::Ok, issues: vec![], unverified_moves: vec![] },
+        verification: api_types::Verification { status: VerificationStatus::Ok, issues: vec![], unverified_moves: vec![], rejected_moves: vec![] },
         provider: "mock".into(),
         model: "mock-1".into(),
     };

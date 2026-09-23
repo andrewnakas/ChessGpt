@@ -1,0 +1,149 @@
+// Typed API client. Types come from crates/api-types via `cargo xtask gen-types`.
+import type {
+  AnalyseGameRequest,
+  AnalyseGameResponse,
+  ApiError,
+  ChatEvent,
+  ChatThread,
+  ChatThreadDetail,
+  CreateThreadRequest,
+  EngineEvent,
+  Explanation,
+  GameAnalysis,
+  GameDetail,
+  GameSummary,
+  ImportRequest,
+  ImportResponse,
+  JobEvent,
+  Meta,
+  Provider,
+  ProviderInput,
+  ProviderTestResult,
+  SendMessageRequest,
+  Settings,
+  SettingsInput,
+  Side
+} from './types';
+
+export class HttpError extends Error {
+  constructor(
+    public status: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+/** Set by the layout to show the login screen on 401. */
+export const authListeners = new Set<() => void>();
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers: body === undefined ? {} : { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  if (res.status === 401) authListeners.forEach((f) => f());
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      msg = ((await res.json()) as ApiError).error;
+    } catch {
+      /* not json */
+    }
+    throw new HttpError(res.status, msg);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const api = {
+  meta: () => request<Meta>('GET', '/meta'),
+  session: () => request<{ required: boolean; authenticated: boolean }>('GET', '/session'),
+  login: (password: string) => request<void>('POST', '/login', { password }),
+
+  games: (limit = 200) => request<GameSummary[]>('GET', `/games?limit=${limit}`),
+  game: (id: string) => request<GameDetail>('GET', `/games/${id}`),
+  deleteGame: (id: string) => request<void>('DELETE', `/games/${id}`),
+  setSide: (id: string, side: Side | null) => request<GameSummary>('PUT', `/games/${id}/side`, { side }),
+  importGames: (r: ImportRequest) => request<ImportResponse>('POST', '/games/import', r),
+  analyse: (id: string, r: AnalyseGameRequest) => request<AnalyseGameResponse>('POST', `/games/${id}/analyse`, r),
+  analysis: (id: string) => request<GameAnalysis>('GET', `/analyses/${id}`),
+  cancelAnalysis: (id: string) => request<void>('POST', `/analyses/${id}/cancel`),
+  explainPly: (id: string, ply: number) => request<Explanation>('POST', `/analyses/${id}/explain/${ply}`),
+
+  settings: () => request<Settings>('GET', '/settings'),
+  saveSettings: (s: SettingsInput) => request<Settings>('PUT', '/settings', s),
+  providers: () => request<Provider[]>('GET', '/providers'),
+  createProvider: (p: ProviderInput) => request<Provider>('POST', '/providers', p),
+  updateProvider: (id: string, p: ProviderInput) => request<Provider>('PUT', `/providers/${id}`, p),
+  deleteProvider: (id: string) => request<void>('DELETE', `/providers/${id}`),
+  testProvider: (id: string) => request<ProviderTestResult>('POST', `/providers/${id}/test`),
+
+  threads: (gameId?: string) =>
+    request<ChatThread[]>('GET', `/chat/threads${gameId ? `?game_id=${encodeURIComponent(gameId)}` : ''}`),
+  createThread: (r: CreateThreadRequest) => request<ChatThread>('POST', '/chat/threads', r),
+  thread: (id: string) => request<ChatThreadDetail>('GET', `/chat/threads/${id}`),
+  deleteThread: (id: string) => request<void>('DELETE', `/chat/threads/${id}`)
+};
+
+/**
+ * Read a server-sent-event stream with fetch (works for POST and supports
+ * abort). Calls `onEvent` for every `data:` payload, parsed as JSON.
+ */
+export async function sse<T>(
+  path: string,
+  onEvent: (e: T) => void,
+  opts: { method?: string; body?: unknown; signal?: AbortSignal } = {}
+): Promise<void> {
+  const res = await fetch(`/api${path}`, {
+    method: opts.method ?? 'GET',
+    headers: {
+      accept: 'text/event-stream',
+      ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {})
+    },
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    signal: opts.signal
+  });
+  if (res.status === 401) authListeners.forEach((f) => f());
+  if (!res.ok || !res.body) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      msg = ((await res.json()) as ApiError).error;
+    } catch {
+      /* ignore */
+    }
+    throw new HttpError(res.status, msg);
+  }
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let idx: number;
+    while ((idx = buf.search(/\r?\n\r?\n/)) >= 0) {
+      const chunk = buf.slice(0, idx);
+      buf = buf.slice(idx).replace(/^\r?\n\r?\n/, '');
+      const data = chunk
+        .split(/\r?\n/)
+        .filter((l) => l.startsWith('data:'))
+        .map((l) => l.slice(5).replace(/^ /, ''))
+        .join('\n');
+      if (data) onEvent(JSON.parse(data) as T);
+    }
+  }
+}
+
+export const streams = {
+  engine: (fen: string, multipv: number, onEvent: (e: EngineEvent) => void, signal: AbortSignal, depth = 30) =>
+    sse<EngineEvent>(
+      `/engine/analyse?fen=${encodeURIComponent(fen)}&multipv=${multipv}&depth=${depth}&movetime_ms=30000`,
+      onEvent,
+      { signal }
+    ),
+  job: (analysisId: string, onEvent: (e: JobEvent) => void, signal: AbortSignal) =>
+    sse<JobEvent>(`/analyses/${analysisId}/events`, onEvent, { signal }),
+  chat: (threadId: string, body: SendMessageRequest, onEvent: (e: ChatEvent) => void, signal: AbortSignal) =>
+    sse<ChatEvent>(`/chat/threads/${threadId}/messages`, onEvent, { method: 'POST', body, signal })
+};

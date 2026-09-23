@@ -188,7 +188,7 @@ async fn analysis_lifecycle_and_mistake_index() {
         concept_tags: vec!["bishop_pair".into(), "development".into()],
         takeaway: "x".into(),
         mentioned_moves: vec![],
-        verification: Verification { status: VerificationStatus::Ok, issues: vec![], unverified_moves: vec![] },
+        verification: Verification { status: VerificationStatus::Ok, issues: vec![], unverified_moves: vec![], rejected_moves: vec![] },
         provider: "anthropic".into(),
         model: "claude-opus-5".into(),
     };

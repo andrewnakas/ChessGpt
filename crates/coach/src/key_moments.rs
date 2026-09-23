@@ -67,13 +67,14 @@ pub fn select(moves: &[MoveEval], user_side: Option<Side>, result: &str, max: us
         && !scored.iter().any(|(_, p, _)| *p == tp)
         && let Some(m) = moves.iter().find(|m| m.ply == tp)
         && m.delta_wc > 0.05
+        && m.win_before >= ALREADY_LOST
     {
         scored.push((weight(m).max(0.5), tp, m.mover));
     }
     for phase in [Phase::Opening, Phase::Middlegame, Phase::Endgame] {
         if let Some(m) = moves
             .iter()
-            .filter(|m| m.phase == phase && m.delta_wc > 0.1)
+            .filter(|m| m.phase == phase && m.delta_wc > 0.1 && m.win_before >= ALREADY_LOST)
             .max_by(|a, b| a.delta_wc.total_cmp(&b.delta_wc))
             && !scored.iter().any(|(_, p, _)| *p == m.ply)
         {

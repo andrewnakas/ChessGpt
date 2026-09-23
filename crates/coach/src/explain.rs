@@ -297,9 +297,10 @@ pub async fn review_game(
             status: VerificationStatus::Partial,
             issues: vec![format!("removed sentences mentioning {}", bad.join(", "))],
             unverified_moves: vec![],
+            rejected_moves: bad.clone(),
         }
     } else {
-        Verification { status: VerificationStatus::Ok, issues: vec![], unverified_moves: vec![] }
+        Verification { status: VerificationStatus::Ok, issues: vec![], unverified_moves: vec![], rejected_moves: vec![] }
     };
     let themes = d.themes.into_iter().filter(|t| is_tag(t)).take(3).collect();
     Ok((GameReview { text, themes, verification }, c.usage))

@@ -375,10 +375,18 @@ impl ChessMcp {
             Ok(s) => s,
             Err(e) => return Ok(fail(e.1)),
         };
-        let analysis = match crate::jobs::wait_done(&c.state, &started.analysis_id, Duration::from_secs(150)).await {
+        // Stay under proxy timeouts (Cloudflare closes requests at 100 s).
+        let analysis = match crate::jobs::wait_done(&c.state, &started.analysis_id, Duration::from_secs(75)).await {
             Ok(an) => an,
             Err(e) => return Ok(fail(e)),
         };
+        if !analysis.status.is_finished() {
+            let url = format!("{}/analyse/{}", c.base, game_id);
+            return Ok(result(
+                format!("The analysis is still running. Call game_report with game_id {game_id} in about a minute, or open {url}"),
+                json!({"kind": "game", "game_id": game_id, "status": "running", "url": url}),
+            ));
+        }
         game_report(&c, &game_id, Some(analysis)).await
     }
 

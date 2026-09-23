@@ -14,6 +14,10 @@ instead: an open-weight model (Apache-2.0) under vLLM, batched.
 The script is resumable (ids already in --out are skipped), so it can span
 several 12-hour Kaggle sessions. The teacher thinks before answering (better
 chess reasoning); the thinking is dropped and only the JSON answer is kept.
+
+With --judge, the same model then grades each answer against the engine data
+(the lab's judge prompt), and `ingest` applies the grade instead of calling an
+API judge. The verifier only checks moves; the judge catches invented claims.
 """
 
 import argparse
@@ -34,6 +38,7 @@ def main():
     ap.add_argument("--max-tokens", type=int, default=4096)
     ap.add_argument("--batch", type=int, default=64, help="prompts per vLLM call (then flushed to --out)")
     ap.add_argument("--no-think", action="store_true")
+    ap.add_argument("--judge", action="store_true", help="grade each answer in a second pass")
     a = ap.parse_args()
 
     done = set()
@@ -53,6 +58,17 @@ def main():
     )
     params = SamplingParams(temperature=0.6, top_p=0.95, max_tokens=a.max_tokens)
     think = re.compile(r"<think>.*?</think>", re.S)
+
+    def first_object(text):
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            return None
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+
     with open(a.out, "a") as out:
         for i in range(0, len(rows), a.batch):
             chunk = rows[i : i + a.batch]
@@ -61,9 +77,27 @@ def main():
                 params,
                 chat_template_kwargs={"enable_thinking": not a.no_think},
             )
-            for r, res in zip(chunk, results):
-                text = think.sub("", res.outputs[0].text).strip()
-                out.write(json.dumps({"id": r["id"], "text": text, "model": a.model}) + "\n")
+            texts = [think.sub("", res.outputs[0].text).strip() for res in results]
+            grades = [None] * len(chunk)
+            if a.judge:
+                todo = [(k, first_object(t)) for k, t in enumerate(texts)]
+                todo = [(k, ans) for k, ans in todo if ans is not None]
+                convs = [
+                    [
+                        {"role": "system", "content": chunk[k]["judge_system"]},
+                        {
+                            "role": "user",
+                            "content": f"STUDENT RATING: {chunk[k]['elo']}\n\nDATA GIVEN TO THE COACH\n{chunk[k]['data']}\n\nCOACH ANSWER\n{json.dumps(ans, indent=2, ensure_ascii=False)}",
+                        },
+                    ]
+                    for k, ans in todo
+                ]
+                if convs:
+                    judged = llm.chat(convs, params, chat_template_kwargs={"enable_thinking": True})
+                    for (k, _), res in zip(todo, judged):
+                        grades[k] = first_object(think.sub("", res.outputs[0].text))
+            for r, text, g in zip(chunk, texts, grades):
+                out.write(json.dumps({"id": r["id"], "text": text, "model": a.model, "grade": g}) + "\n")
             out.flush()
             print(f"{min(i + a.batch, len(rows))}/{len(rows)}")
 

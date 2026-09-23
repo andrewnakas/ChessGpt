@@ -694,6 +694,7 @@ async fn accept(
     e: &api_types::Explanation,
     teacher: &str,
     judge_p: Option<&dyn Provider>,
+    grade_given: Option<&Value>,
     min_judge: f64,
     wire: &llm::openai::OpenAiCompat,
 ) -> Result<Value, String> {
@@ -715,8 +716,12 @@ async fn accept(
     });
     let prompt = prompts::explain_moment(ctx, &r.eval, &r.moment);
     let mut score = None;
-    if let Some(j) = judge_p {
-        let g = grade(j, r.elo, &prompt, &answer).await;
+    let graded = match (grade_given, judge_p) {
+        (Some(g), _) => Some(Some(g.clone())),
+        (None, Some(j)) => Some(grade(j, r.elo, &prompt, &answer).await),
+        (None, None) => None,
+    };
+    if let Some(g) = graded {
         let ks = ["accuracy", "insight", "level", "takeaway"];
         let v: Vec<f64> = ks.iter().filter_map(|k| g.as_ref()?.get(*k)?.as_f64()).collect();
         if v.len() != ks.len() {
@@ -769,7 +774,18 @@ fn export_prompts(args: &[String]) -> Result<()> {
         let mut req = ChatRequest::new(prompts::explain_system(&ctx), vec![Message::user(prompts::explain_moment(&ctx, &r.eval, &r.moment))]);
         req.json_schema = Some(JsonSchema { name: "move_explanation".into(), schema: prompts::explanation_schema() });
         let body = wire.body_with(&req, false);
-        lines.push(json!({"id": r.id, "messages": body["messages"], "schema": prompts::explanation_schema()}).to_string());
+        lines.push(
+            json!({
+                "id": r.id,
+                "messages": body["messages"],
+                "schema": prompts::explanation_schema(),
+                // For grading on the same box (teacher_vllm.py --judge).
+                "elo": r.elo,
+                "data": prompts::explain_moment(&ctx, &r.eval, &r.moment),
+                "judge_system": JUDGE_SYSTEM,
+            })
+            .to_string(),
+        );
     }
     std::fs::write(&out, lines.join("\n") + "\n")?;
     eprintln!("wrote {} prompts to {out}", lines.len());
@@ -804,7 +820,7 @@ async fn ingest(args: &[String]) -> Result<()> {
         let game = r.game()?;
         let ctx = GameContext::new(&game, Some(r.user_side), r.elo, r.opening.clone());
         let res = match coach::explain::verify_answer(&ctx, &r.eval, &r.moment, text, "batch", model) {
-            Ok(e) => accept(r, &ctx, &e, model, judge_p.as_deref(), min_judge, &wire).await,
+            Ok(e) => accept(r, &ctx, &e, model, judge_p.as_deref(), v.get("grade").filter(|g| g.is_object()), min_judge, &wire).await,
             Err(e) => Err(format!("bad json: {e}")),
         };
         match res {
@@ -878,7 +894,7 @@ async fn datagen(args: &[String]) -> Result<()> {
             if x.response["texts"].as_array().is_none_or(|t| t.len() != 1) {
                 return (r, Err("needed a correction round".into()));
             }
-            let line = accept(r, &ctx, &x.explanation, teacher.model(), judge_p.as_deref(), min_judge, wire).await;
+            let line = accept(r, &ctx, &x.explanation, teacher.model(), judge_p.as_deref(), None, min_judge, wire).await;
             (r, line)
         }
     }))

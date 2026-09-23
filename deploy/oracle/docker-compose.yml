@@ -2,7 +2,7 @@
 # a Cloudflare Tunnel: no open ports, no certificates to manage.
 services:
   chessgpt:
-    image: ${CHESSGPT_IMAGE:-ghcr.io/chessgpt/chessgpt:latest}
+    image: ${CHESSGPT_IMAGE:-ghcr.io/andrewnakas/chessgpt:latest}
     restart: unless-stopped
     environment:
       CHESSGPT_MODE: hosted

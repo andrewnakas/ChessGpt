@@ -25,7 +25,10 @@ Every move the model mentions is checked against the engine before you see it.
 
 ## Run it
 
-You need Rust 1.98+ and Node 24+ (`winget install OpenJS.NodeJS.LTS` on Windows).
+You need Rust 1.98+ and Node 24+.
+
+- Windows: `winget install OpenJS.NodeJS.LTS` (Stockfish is downloaded for you)
+- macOS: `brew install rustup node stockfish && rustup-init`
 
 ```sh
 cargo xtask setup     # web dependencies, Stockfish 19 (checksum-pinned), generated types

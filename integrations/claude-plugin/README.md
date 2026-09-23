@@ -5,7 +5,7 @@ Bundles the chessgpt remote MCP server (`https://chessgpt.com/mcp`) with a `ches
 Install in Claude Code:
 
 ```
-/plugin marketplace add chessgpt/chessgpt
+/plugin marketplace add andrewnakas/ChessGpt
 /plugin install chessgpt@chessgpt
 ```
 

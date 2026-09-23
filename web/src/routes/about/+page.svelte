@@ -16,7 +16,7 @@
   <p>
     Inaccuracies, mistakes, blunders and accuracy use exactly the formulas Lichess uses, so the numbers are comparable.
     chessgpt adds book, best, excellent and missed-win labels.
-    <a href="https://github.com/chessgpt/chessgpt/blob/main/docs/classification.md">Details</a>.
+    <a href="https://github.com/andrewnakas/ChessGpt/blob/main/docs/classification.md">Details</a>.
   </p>
 
   <h2>Your data</h2>
@@ -29,7 +29,7 @@
   <h2>Source code and licenses</h2>
   <ul>
     <li>
-      <a href="https://github.com/chessgpt/chessgpt">chessgpt</a>, version {app.meta?.version ?? '…'}: GNU Affero General
+      <a href="https://github.com/andrewnakas/ChessGpt">chessgpt</a>, version {app.meta?.version ?? '…'}: GNU Affero General
       Public License v3.0. If you use this service over a network, you are entitled to its source code at that link.
     </li>
     <li>

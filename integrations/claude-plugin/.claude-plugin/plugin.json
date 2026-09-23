@@ -5,7 +5,7 @@
   "description": "Stockfish analysis, move-checked lines and your chessgpt game library, with a coaching skill that explains games at your rating.",
   "author": { "name": "chessgpt", "url": "https://chessgpt.com" },
   "homepage": "https://chessgpt.com/connect",
-  "repository": "https://github.com/chessgpt/chessgpt",
+  "repository": "https://github.com/andrewnakas/ChessGpt",
   "license": "AGPL-3.0-only",
   "keywords": ["chess", "stockfish", "coach", "lichess", "chess.com"]
 }

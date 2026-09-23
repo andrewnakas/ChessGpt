@@ -111,7 +111,7 @@
 </main>
 
 <footer class="muted">
-  <a href="https://github.com/chessgpt/chessgpt">chessgpt</a> is open source (AGPL-3.0). Analysis by
+  <a href="https://github.com/andrewnakas/ChessGpt">chessgpt</a> is open source (AGPL-3.0). Analysis by
   <a href="https://stockfishchess.org">Stockfish</a> (GPL-3.0). <a href="/about">About, source and licenses</a>.
 </footer>
 

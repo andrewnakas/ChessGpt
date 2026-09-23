@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # One-time setup on a fresh Oracle Cloud Ubuntu (ARM) server.
-#   curl -fsSL https://raw.githubusercontent.com/<you>/chessgpt/main/deploy/oracle/setup.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/andrewnakas/ChessGpt/main/deploy/oracle/setup.sh | bash
 set -euo pipefail
 
-REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/chessgpt/chessgpt/main}"
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/andrewnakas/ChessGpt/main}"
 DIR="$HOME/chessgpt"
 
 if ! command -v docker >/dev/null; then
@@ -18,11 +18,11 @@ curl -fsSL "$REPO_RAW/deploy/oracle/docker-compose.yml" -o docker-compose.yml
 
 if [ ! -f .env ]; then
   read -rp "Cloudflare tunnel token: " TUNNEL_TOKEN
-  read -rp "Docker image [ghcr.io/chessgpt/chessgpt:latest]: " IMAGE
+  read -rp "Docker image [ghcr.io/andrewnakas/chessgpt:latest]: " IMAGE
   read -rp "Anthropic API key for the on-site coach (optional, Enter to skip): " AKEY
   cat > .env <<ENV
 TUNNEL_TOKEN=$TUNNEL_TOKEN
-CHESSGPT_IMAGE=${IMAGE:-ghcr.io/chessgpt/chessgpt:latest}
+CHESSGPT_IMAGE=${IMAGE:-ghcr.io/andrewnakas/chessgpt:latest}
 CHESSGPT_DOMAIN=chessgpt.com
 ANTHROPIC_API_KEY=$AKEY
 ENV

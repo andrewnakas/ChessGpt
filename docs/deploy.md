@@ -22,15 +22,11 @@ Oracle Cloud account.
 
 ## 1. Put the code on GitHub
 
-1. Create a **public** repository named `chessgpt` on github.com (public: free ARM builds, and
-   AGPL wants the source public anyway).
-2. From `C:\Users\andre\Documents\chessgpt`:
-   ```
-   git remote add origin https://github.com/<you>/chessgpt.git
-   git push -u origin main
-   ```
+1. The code is public at https://github.com/andrewnakas/ChessGpt. On another machine:
+   `git clone https://github.com/andrewnakas/ChessGpt.git chessgpt`
+2. Every push to `main` runs the build.
 3. Watch **Actions → release**. It builds the server for Intel and ARM (about 15 minutes the
-   first time) and publishes `ghcr.io/<you>/chessgpt`.
+   first time) and publishes `ghcr.io/andrewnakas/chessgpt`.
 4. When it's done: your GitHub profile → **Packages → chessgpt → Package settings → Change
    visibility → Public**, so the Oracle server can download it without a password.
 
@@ -60,13 +56,13 @@ Oracle Cloud account.
 SSH in (`ssh ubuntu@<public-ip>`) and run:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/<you>/chessgpt/main/deploy/oracle/setup.sh -o setup.sh
-REPO_RAW=https://raw.githubusercontent.com/<you>/chessgpt/main bash setup.sh
+curl -fsSL https://raw.githubusercontent.com/andrewnakas/ChessGpt/main/deploy/oracle/setup.sh -o setup.sh
+REPO_RAW=https://raw.githubusercontent.com/andrewnakas/ChessGpt/main bash setup.sh
 ```
 
 It installs Docker and asks for:
 - the **tunnel token** from step 2,
-- the image: `ghcr.io/<you>/chessgpt:latest`,
+- the image: `ghcr.io/andrewnakas/chessgpt:latest`,
 - optionally an **Anthropic API key** for the on-site coach (capped at 3M tokens a day; change
   `CHESSGPT_LLM_DAILY_TOKENS` in `~/chessgpt/.env`).
 
@@ -83,6 +79,14 @@ It starts chessgpt plus the tunnel and installs a nightly update from GitHub. Ch
 4. **Actions → release → Run workflow**. The `cloudflare` job deploys the site and claims
    `chessgpt.com` and `www.chessgpt.com`. (Delete any old A/CNAME records for `@` and `www` in
    Cloudflare DNS first, or the domain claim fails.)
+
+**Or deploy from your Mac** with Wrangler (already logged in to Cloudflare):
+
+```
+git clone https://github.com/andrewnakas/ChessGpt.git chessgpt && cd chessgpt
+cd web && npm ci && npm run build && cd ..
+npx wrangler deploy --config deploy/cloudflare/wrangler.jsonc
+```
 
 ## 6. Check it
 

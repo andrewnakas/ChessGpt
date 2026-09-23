@@ -67,7 +67,7 @@ CHESSGPT_PUBLIC_URL=https://chessgpt.com     # required: issuer, resource URL an
 **ChatGPT** (Plus, Pro, Business, Enterprise, Edu on the web): Settings → Security → Developer
 mode on, then Settings → Apps → Create → URL `https://chessgpt.com/mcp`, authentication OAuth.
 
-**Claude Code**: `/plugin marketplace add chessgpt/chessgpt` then `/plugin install chessgpt@chessgpt`,
+**Claude Code**: `/plugin marketplace add andrewnakas/ChessGpt` then `/plugin install chessgpt@chessgpt`,
 or `claude mcp add --transport http chessgpt https://chessgpt.com/mcp`.
 
 ## Getting listed

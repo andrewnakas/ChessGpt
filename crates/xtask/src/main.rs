@@ -105,8 +105,23 @@ fn pinned_asset() -> Result<Asset> {
     bail!("stockfish.lock has no entry for {platform}")
 }
 
+fn on_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os("PATH").and_then(|paths| std::env::split_paths(&paths).map(|d| d.join(name)).find(|p| p.is_file()))
+}
+
 fn fetch_stockfish() -> Result<()> {
-    let a = pinned_asset()?;
+    let a = match pinned_asset() {
+        Ok(a) => a,
+        Err(e) => {
+            // macOS and other platforms: use a system Stockfish (e.g. `brew install stockfish`).
+            if let Some(p) = on_path("stockfish") {
+                println!("using system stockfish: {}", p.display());
+                return Ok(());
+            }
+            bail!("{e}
+On macOS: brew install stockfish");
+        }
+    };
     let engines = root().join("engines");
     let bin = engines.join(&a.binary);
     if bin.is_file() {

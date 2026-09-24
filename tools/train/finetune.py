@@ -115,7 +115,8 @@ def main():
 
         model.save_pretrained_gguf(a.scratch, tokenizer, quantization_method="q4_k_m")
         os.makedirs(f"{a.out}/gguf", exist_ok=True)
-        for f in glob.glob(f"{a.scratch}/**/*.gguf", recursive=True):
+        # Unsloth writes to "<dir>_gguf", so look next to the scratch dir too.
+        for f in glob.glob(f"{a.scratch}*/**/*.gguf", recursive=True):
             if "q4_k_m" in f.lower():
                 shutil.copy(f, f"{a.out}/gguf/")
                 print(f"saved {a.out}/gguf/{os.path.basename(f)}")

@@ -96,7 +96,11 @@ JSON, and a judge score of at least 90% of the teacher's.
    you have quota.
 
 3. **Fine-tune.** `tools/train/finetune.py` does QLoRA with Unsloth on a free
-   Kaggle notebook (2x T4) or a GTX 1080 / RTX 4050.
+   Kaggle notebook (2x T4) or a GTX 1080 / RTX 4050. The student is **Qwen3-4B**,
+   text-only and Apache-2.0. The multimodal Qwen3.5-4B runs out of memory on a
+   T4 when Unsloth computes the loss, because its full vocabulary logits get
+   materialized. WebLLM ships a prebuilt Qwen3-4B library, and prompts are
+   rendered with thinking off, the same way the browser and llama.cpp run it.
 
 4. **Export.** `tools/train/export.sh` writes GGUF Q4_K_M for llama.cpp and
    MLC q4f16_1 for WebLLM. The MLC build reuses WebLLM's prebuilt library, so

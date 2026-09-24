@@ -4,12 +4,12 @@
 #   MLC q4f16_1 for WebLLM (the browser), reusing WebLLM's prebuilt model
 #   library for the same architecture, so no WebGPU compile is needed.
 #
-#   ./export.sh coach-4b/merged coach-4b Qwen3.5-4B
+#   ./export.sh coach-4b/merged coach-4b Qwen3-4B
 #
 # Needs: a llama.cpp checkout (LLAMA_CPP, built) and `pip install mlc-llm`
 # (nightly wheel from https://mlc.ai/package/). CPU-only is fine.
 set -euo pipefail
-merged=$1 name=$2 base=${3:-Qwen3.5-4B}
+merged=$1 name=$2 base=${3:-Qwen3-4B}
 out=${OUT:-export}
 LLAMA_CPP=${LLAMA_CPP:-$HOME/llama.cpp}
 mkdir -p "$out"

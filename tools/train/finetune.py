@@ -4,7 +4,7 @@ Runs on a free Kaggle notebook (2x T4, 16 GB each) or any CUDA GPU with
 >= 8 GB (a GTX 1080 works with --bf16 off, which is the default here).
 
     pip install unsloth trl datasets
-    python finetune.py --data sft.jsonl --base unsloth/Qwen3.5-4B --out coach-4b
+    python finetune.py --data sft.jsonl --base unsloth/Qwen3-4B --out coach-4b
 
 Input: the JSONL written by `chessgpt-lab datagen` ({"messages": [...]}).
 Output: <out>/merged (16-bit weights for GGUF/MLC export) and <out>/lora.
@@ -43,9 +43,9 @@ def load(path, tokenizer, holdout):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", required=True)
-    ap.add_argument("--base", default="unsloth/Qwen3.5-4B")
+    ap.add_argument("--base", default="unsloth/Qwen3-4B")
     ap.add_argument("--out", default="coach")
-    ap.add_argument("--max-len", type=int, default=6144)
+    ap.add_argument("--max-len", type=int, default=3072)
     ap.add_argument("--epochs", type=float, default=2)
     ap.add_argument("--lr", type=float, default=2e-4)
     ap.add_argument("--rank", type=int, default=16)

@@ -20,7 +20,9 @@ import random
 
 from datasets import Dataset
 from trl import SFTConfig, SFTTrainer
-from unsloth import FastLanguageModel
+# FastModel handles text-only and multimodal bases (Qwen3.5 is image-text-to-text;
+# we train its text path only).
+from unsloth import FastModel
 
 
 def load(path, tokenizer, holdout):
@@ -51,10 +53,13 @@ def main():
     ap.add_argument("--accum", type=int, default=16)
     ap.add_argument("--holdout", type=float, default=0.03)
     ap.add_argument("--bf16", action="store_true", help="Ampere or newer (not T4 / GTX 10xx)")
+    ap.add_argument("--gguf", action="store_true", help="also write a Q4_K_M GGUF for llama.cpp")
     a = ap.parse_args()
 
-    model, tokenizer = FastLanguageModel.from_pretrained(a.base, max_seq_length=a.max_len, load_in_4bit=True)
-    model = FastLanguageModel.get_peft_model(
+    model, tokenizer = FastModel.from_pretrained(a.base, max_seq_length=a.max_len, load_in_4bit=True)
+    # Multimodal bases hand back a processor; the chat template and eos live on its tokenizer.
+    tokenizer = getattr(tokenizer, "tokenizer", tokenizer)
+    model = FastModel.get_peft_model(
         model,
         r=a.rank,
         lora_alpha=a.rank,
@@ -98,6 +103,9 @@ def main():
     tokenizer.save_pretrained(f"{a.out}/lora")
     model.save_pretrained_merged(f"{a.out}/merged", tokenizer, save_method="merged_16bit")
     print(f"saved {a.out}/merged")
+    if a.gguf:
+        model.save_pretrained_gguf(f"{a.out}/gguf", tokenizer, quantization_method="q4_k_m")
+        print(f"saved {a.out}/gguf")
 
 
 if __name__ == "__main__":

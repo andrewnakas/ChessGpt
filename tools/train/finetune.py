@@ -16,6 +16,7 @@ and only the completion is trained on.
 
 import argparse
 import json
+import os
 import random
 
 from datasets import Dataset
@@ -54,6 +55,8 @@ def main():
     ap.add_argument("--holdout", type=float, default=0.0)
     ap.add_argument("--bf16", action="store_true", help="Ampere or newer (not T4 / GTX 10xx)")
     ap.add_argument("--gguf", action="store_true", help="also write a Q4_K_M GGUF for llama.cpp")
+    ap.add_argument("--merged", action="store_true", help="also keep merged 16-bit weights (~8 GB; needed for MLC export)")
+    ap.add_argument("--scratch", default="/tmp/coach-build", help="roomy disk for intermediate files")
     a = ap.parse_args()
 
     model, tokenizer = FastModel.from_pretrained(a.base, max_seq_length=a.max_len, load_in_4bit=True)
@@ -101,11 +104,21 @@ def main():
     trainer.train()
     model.save_pretrained(f"{a.out}/lora")
     tokenizer.save_pretrained(f"{a.out}/lora")
-    model.save_pretrained_merged(f"{a.out}/merged", tokenizer, save_method="merged_16bit")
-    print(f"saved {a.out}/merged")
+    if a.merged:
+        model.save_pretrained_merged(f"{a.out}/merged", tokenizer, save_method="merged_16bit")
+        print(f"saved {a.out}/merged")
     if a.gguf:
-        model.save_pretrained_gguf(f"{a.out}/gguf", tokenizer, quantization_method="q4_k_m")
-        print(f"saved {a.out}/gguf")
+        # The f16 intermediate is as big as the merged model: build it on
+        # scratch disk (Kaggle's output dir holds ~20 GB) and keep only Q4_K_M.
+        import glob
+        import shutil
+
+        model.save_pretrained_gguf(a.scratch, tokenizer, quantization_method="q4_k_m")
+        os.makedirs(f"{a.out}/gguf", exist_ok=True)
+        for f in glob.glob(f"{a.scratch}/**/*.gguf", recursive=True):
+            if "q4_k_m" in f.lower():
+                shutil.copy(f, f"{a.out}/gguf/")
+                print(f"saved {a.out}/gguf/{os.path.basename(f)}")
 
 
 if __name__ == "__main__":

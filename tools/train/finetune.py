@@ -51,7 +51,7 @@ def main():
     ap.add_argument("--rank", type=int, default=16)
     ap.add_argument("--batch", type=int, default=1)
     ap.add_argument("--accum", type=int, default=16)
-    ap.add_argument("--holdout", type=float, default=0.03)
+    ap.add_argument("--holdout", type=float, default=0.0)
     ap.add_argument("--bf16", action="store_true", help="Ampere or newer (not T4 / GTX 10xx)")
     ap.add_argument("--gguf", action="store_true", help="also write a Q4_K_M GGUF for llama.cpp")
     a = ap.parse_args()
@@ -68,14 +68,13 @@ def main():
         use_gradient_checkpointing="unsloth",
         random_state=0,
     )
-    train, evals = load(a.data, tokenizer, a.holdout)
-    print(f"{len(train)} training examples, {len(evals)} held out")
+    train, held = load(a.data, tokenizer, a.holdout)
+    print(f"{len(train)} training examples ({len(held)} held back unused; evaluate with cargo xtask eval)")
 
     trainer = SFTTrainer(
         model=model,
         processing_class=tokenizer,
         train_dataset=train,
-        eval_dataset=evals,
         args=SFTConfig(
             output_dir=f"{a.out}/checkpoints",
             max_length=a.max_len,
@@ -87,8 +86,9 @@ def main():
             lr_scheduler_type="cosine",
             warmup_ratio=0.03,
             logging_steps=10,
-            eval_strategy="steps",
-            eval_steps=100,
+            # Validation loss here would materialize full-vocabulary logits
+            # (out of memory on a T4); `cargo xtask eval` is the real measure.
+            eval_strategy="no",
             save_steps=200,
             save_total_limit=2,
             bf16=a.bf16,

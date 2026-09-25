@@ -6,7 +6,7 @@ instead: an open-weight model (Apache-2.0) under vLLM, batched.
     # on the laptop
     cargo run -p lab -- export-prompts --set moments.jsonl --out prompts.jsonl
     # on Kaggle (GPU T4 x2), with prompts.jsonl uploaded as a dataset
-    pip install vllm
+    pip install vllm==0.30.0
     python teacher_vllm.py --prompts prompts.jsonl --out responses.jsonl
     # back on the laptop: verify with the production checks, keep the good ones
     cargo run -p lab -- ingest --set moments.jsonl --responses responses.jsonl --out sft.jsonl
@@ -34,7 +34,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--model", default="Qwen/Qwen3-32B-AWQ", help="an Apache-2.0 instruct model that fits the GPUs")
     ap.add_argument("--tp", type=int, default=2, help="tensor parallel size (GPUs)")
-    ap.add_argument("--max-len", type=int, default=10240)
+    ap.add_argument("--max-len", type=int, default=9216)
     ap.add_argument("--max-tokens", type=int, default=4096)
     ap.add_argument("--batch", type=int, default=64, help="prompts per vLLM call (then flushed to --out)")
     ap.add_argument("--no-think", action="store_true")
@@ -53,7 +53,11 @@ def main():
         tensor_parallel_size=a.tp,
         dtype="half",  # T4 has no bf16
         max_model_len=a.max_len,
-        gpu_memory_utilization=0.92,
+        # Leave headroom for activations: at 0.92 some T4 pairs ran out of
+        # memory mid-run. The longest request (prompt, thinking, answer) is ~8k tokens.
+        gpu_memory_utilization=0.88,
+        max_num_seqs=8,
+        disable_custom_all_reduce=True,  # the T4 pair has no P2P
         enable_prefix_caching=True,  # moments from one game share the system prompt
     )
     params = SamplingParams(temperature=0.6, top_p=0.95, max_tokens=a.max_tokens)

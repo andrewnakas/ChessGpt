@@ -34,7 +34,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--model", default="Qwen/Qwen3-32B-AWQ", help="an Apache-2.0 instruct model that fits the GPUs")
     ap.add_argument("--tp", type=int, default=2, help="tensor parallel size (GPUs)")
-    ap.add_argument("--max-len", type=int, default=12288)
+    ap.add_argument("--max-len", type=int, default=10240)
     ap.add_argument("--max-tokens", type=int, default=4096)
     ap.add_argument("--batch", type=int, default=64, help="prompts per vLLM call (then flushed to --out)")
     ap.add_argument("--no-think", action="store_true")

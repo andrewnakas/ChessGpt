@@ -83,7 +83,9 @@ def main():
     data = encode(a.data, tokenizer, a.max_len)
 
     model = AutoModelForCausalLM.from_pretrained(a.base, torch_dtype=torch.bfloat16)
-    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    # preserve_rng_state=False: checkpointing would otherwise look up `torch.xla`
+    # for RNG state, which torch_xla doesn't provide. No dropout, so no RNG needed.
+    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False, "preserve_rng_state": False})
     model.enable_input_require_grads()
     model = get_peft_model(
         model,

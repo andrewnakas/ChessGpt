@@ -28,6 +28,10 @@ fn row_to_puzzle(r: &SqliteRow) -> Result<Puzzle> {
         solution_uci: serde_json::from_str(&r.try_get::<String, _>("solution_json")?)?,
         line_san: serde_json::from_str(&r.try_get::<String, _>("line_json")?)?,
         themes: serde_json::from_str(&r.try_get::<String, _>("themes_json")?)?,
+        accept_uci: match r.try_get::<Option<String>, _>("accept_json")? {
+            Some(j) => serde_json::from_str(&j)?,
+            None => vec![],
+        },
         reps: r.try_get::<i64, _>("reps")? as u32,
         lapses: r.try_get::<i64, _>("lapses")? as u32,
         due_at: r.try_get("due_at")?,
@@ -58,6 +62,16 @@ impl Db {
         .execute(&self.pool)
         .await?;
         Ok(r.rows_affected() == 1)
+    }
+
+    pub async fn puzzle(&self, id: &str) -> Result<Puzzle> {
+        let r = sqlx::query("SELECT * FROM puzzles WHERE user_id = ? AND id = ?")
+            .bind(&self.user_id)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(DbError::NotFound)?;
+        row_to_puzzle(&r)
     }
 
     /// Puzzles due now, most overdue first.

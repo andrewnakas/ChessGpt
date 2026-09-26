@@ -7,6 +7,7 @@
 //!   chessgpt-lab fit-rating PGN...
 //!   chessgpt-lab export-prompts --set FILE --out FILE     (for batch generation on a GPU box)
 //!   chessgpt-lab ingest --set FILE --responses FILE --out FILE [--min-judge S]
+//!   chessgpt-lab bank --out FILE [--per-bucket N] < lichess_db_puzzle.csv   (drill bank)
 //!   chessgpt-lab baseline --out FILE [--per-band N] PGN...   (Lichess games with [%eval])   (Lichess games with [%eval] on every move)
 //!
 //! The model under test comes from `LAB_LLM_PROVIDER` / `_MODEL` / `_BASE_URL`
@@ -122,11 +123,85 @@ async fn main() -> Result<()> {
         Some("baseline") => baseline(&args[1..]).await,
         Some("export-prompts") => export_prompts(&args[1..]),
         Some("ingest") => ingest(&args[1..]).await,
+        Some("bank") => bank(&args[1..]),
         _ => {
-            eprintln!("usage: chessgpt-lab <build-set|eval|fit-rating|datagen|export-prompts|ingest|baseline> ...  (see the source header)");
+            eprintln!("usage: chessgpt-lab <build-set|eval|fit-rating|datagen|export-prompts|ingest|baseline|bank> ...  (see the source header)");
             std::process::exit(2);
         }
     }
+}
+
+// ---------------------------------------------------------------- bank
+
+/// Pick the drill bank from the full Lichess puzzle CSV on stdin: well-rated,
+/// popular puzzles, at most `--per-bucket` per theme and 200-point rating
+/// bucket, and only those whose solution the motif detectors confirm.
+///   curl -sL https://database.lichess.org/lichess_db_puzzle.csv.zst | zstd -dc | chessgpt-lab bank --out crates/coach/data/drill_bank.csv
+fn bank(args: &[String]) -> Result<()> {
+    use coach::bank::{BANK_THEMES, BankPuzzle, confirms};
+    use std::io::BufRead;
+    let out = flag(args, "--out").context("--out FILE is required")?;
+    let per_bucket: u32 = flag(args, "--per-bucket").map(|v| v.parse()).transpose()?.unwrap_or(40);
+    let mut counts: BTreeMap<(String, i32), u32> = BTreeMap::new();
+    let mut rows: Vec<BankPuzzle> = vec![];
+    let mut seen = 0u64;
+    for line in std::io::stdin().lock().lines() {
+        let line = line?;
+        seen += 1;
+        if seen % 500_000 == 0 {
+            eprintln!("{seen} read, {} kept", rows.len());
+        }
+        // PuzzleId,FEN,Moves,Rating,RatingDeviation,Popularity,NbPlays,Themes,...
+        let c: Vec<&str> = line.split(',').collect();
+        if c.len() < 8 || c[0] == "PuzzleId" {
+            continue;
+        }
+        let num = |i: usize| c[i].parse::<i32>().unwrap_or(0);
+        let (rating, deviation, popularity, plays) = (num(3), num(4), num(5), num(6));
+        if deviation > 90 || popularity < 85 || plays < 300 || !(400..3000).contains(&rating) {
+            continue;
+        }
+        let bucket = rating / 200 * 200;
+        let wanted: Vec<&str> = c[7]
+            .split_whitespace()
+            .filter(|t| BANK_THEMES.iter().any(|(b, _)| b == t))
+            .filter(|t| counts.get(&(t.to_string(), bucket)).copied().unwrap_or(0) < per_bucket)
+            .collect();
+        if wanted.is_empty() {
+            continue;
+        }
+        let mut p = BankPuzzle {
+            id: c[0].into(),
+            fen: c[1].into(),
+            moves: c[2].split_whitespace().map(String::from).collect(),
+            rating,
+            themes: wanted.iter().map(|t| t.to_string()).collect(),
+        };
+        let Some((fen, solution)) = p.solving() else { continue };
+        let found = chess_core::motifs::solver_motifs(&parse_fen(&fen)?, &solution);
+        // Keep only the themes the detectors back up.
+        p.themes.retain(|t| confirms(t, &found));
+        if p.themes.is_empty() {
+            continue;
+        }
+        for t in &p.themes {
+            *counts.entry((t.clone(), bucket)).or_default() += 1;
+        }
+        rows.push(p);
+    }
+    rows.sort_by(|a, b| (a.rating, &a.id).cmp(&(b.rating, &b.id)));
+    let mut text = String::from("PuzzleId,FEN,Moves,Rating,Themes\n");
+    for r in &rows {
+        text.push_str(&r.to_row());
+        text.push('\n');
+    }
+    std::fs::write(&out, text)?;
+    let mut per_theme: BTreeMap<&str, u32> = BTreeMap::new();
+    for ((t, _), n) in &counts {
+        *per_theme.entry(t.as_str()).or_default() += n;
+    }
+    eprintln!("{seen} read, {} kept -> {out}\n{per_theme:?}", rows.len());
+    Ok(())
 }
 
 // ---------------------------------------------------------------- build-set

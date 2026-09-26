@@ -2,8 +2,10 @@
 //! explanations with move verification, and the tool-using chat.
 
 pub mod analysis;
+pub mod bank;
 pub mod bands;
 pub mod chat;
+pub mod drills;
 pub mod explain;
 pub mod key_moments;
 pub mod prompts;

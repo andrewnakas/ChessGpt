@@ -1,15 +1,18 @@
 <script lang="ts">
   import { api } from '$lib/api/client';
-  import type { Progress } from '$lib/api/types';
+  import type { DrillOverview, Progress } from '$lib/api/types';
+  import { tagLabel } from '$lib/chess';
   import RatingTrend from '$lib/components/RatingTrend.svelte';
   import { onMount } from 'svelte';
 
   let data = $state<Progress | null>(null);
+  let drills = $state<DrillOverview | null>(null);
   let error = $state<string | null>(null);
 
   onMount(async () => {
     try {
       data = await api.progress();
+      drills = await api.drills().catch(() => null);
     } catch (e) {
       error = (e as Error).message;
     }
@@ -24,6 +27,7 @@
   const maxMotif = $derived(Math.max(0.1, ...(data?.motifs.map((m) => m.per_100_moves) ?? [])));
   const maxPhase = $derived(Math.max(0.1, ...(data?.phases.map((p) => p.per_100_moves) ?? [])));
   const PHASE_ORDER = { opening: 0, middlegame: 1, endgame: 2 } as const;
+  const drilled = $derived(new Map((drills?.techniques ?? []).filter((t) => t.attempted).map((t) => [t.tag, t])));
   const scoreText = (s: number | null) => (s === 1 ? 'win' : s === 0 ? 'loss' : s === 0.5 ? 'draw' : '–');
 </script>
 
@@ -92,11 +96,18 @@
               <span class="val mono">{m.per_100_moves}</span>
               <span class="muted small detail">
                 {#if m.missed}missed {m.missed}{/if}{#if m.missed && m.allowed} · {/if}{#if m.allowed}allowed {m.allowed}{/if}
+                {#if drilled.get(m.tag)}· drills {drilled.get(m.tag)!.clean}/{drilled.get(m.tag)!.attempted} clean{/if}
               </span>
             </li>
           {/each}
         </ul>
         <p class="muted small">Per 100 of your moves. "Missed": the better move used it. "Allowed": your move let the opponent use it.</p>
+      {/if}
+      {#if drills?.focus.length}
+        <p class="drillcta">
+          <a href="/drills">Drill {drills.focus.slice(0, 2).map((t) => tagLabel(t).toLowerCase()).join(' and ')} →</a>
+          <span class="muted small">{drills.week_done}/{drills.week_goal} sets this week</span>
+        </p>
       {/if}
     </section>
 
@@ -140,6 +151,13 @@
 {/if}
 
 <style>
+  .drillcta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    align-items: baseline;
+    margin: 0.8rem 0 0;
+  }
   .pad {
     padding: 1rem 1.2rem;
   }

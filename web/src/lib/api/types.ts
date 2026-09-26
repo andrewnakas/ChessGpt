@@ -287,7 +287,7 @@ rating: number | null,
  */
 solved: boolean | null, };
 
-export type DrillSource = { "kind": "mistake", analysis_id: string, ply: number, } | { "kind": "puzzle", id: string, } | { "kind": "theme", tag: string, } | { "kind": "weakest" };
+export type DrillSource = { "kind": "mistake", analysis_id: string, ply: number, } | { "kind": "puzzle", id: string, } | { "kind": "theme", tag: string, } | { "kind": "weakest" } | { "kind": "daily", date: string, };
 
 export type DrillSet = { id: string, 
 /**
@@ -315,7 +315,7 @@ focus: Array<string>,
 /**
  * Sets finished in the last 7 days, against the weekly goal.
  */
-week_done: number, week_goal: number, recent: Array<DrillSetSummary>, };
+week_done: number, week_goal: number, daily: DailyStatus, recent: Array<DrillSetSummary>, };
 
 export type DrillSetSummary = { id: string, technique: string, label: string, items: number, attempted: number, solved: number, created_at: number, completed_at: number | null, };
 
@@ -328,6 +328,21 @@ tag: string,
  * "missed" (the better line used it), "allowed" (the opponent's reply uses it), "coach".
  */
 kind: string, };
+
+export type DailyStatus = { 
+/**
+ * UTC date, YYYY-MM-DD.
+ */
+date: string, technique: string, label: string, 
+/**
+ * Today's set, once started.
+ */
+set_id: string | null, done: boolean, 
+/**
+ * Consecutive days with the daily drill finished, up to today (or
+ * yesterday, when today's is still open).
+ */
+streak: number, };
 
 export type ChatRole = "user" | "assistant";
 

@@ -1,7 +1,7 @@
 // Drills for guests (no account): the server builds a set on request
 // (POST /api/drills/try) and stores nothing; the set and its results live in
 // this browser.
-import type { DrillAttempt, DrillOverview, DrillSet, DrillSource, TechniqueMastery } from '$lib/api/types';
+import type { DailyStatus, DrillAttempt, DrillOverview, DrillSet, DrillSource, TechniqueMastery } from '$lib/api/types';
 import { tagLabel } from '$lib/chess';
 import { DRILLABLE } from './drills';
 
@@ -36,7 +36,37 @@ function save(s: Stored) {
 const WEEK_MS = 7 * 86_400_000;
 const MONTH_MS = 30 * 86_400_000;
 
-export function overview(weakTags: string[]): DrillOverview {
+const DAY_MS = 86_400_000;
+const dateOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/** Today's daily drill from this browser's history, given today's set. */
+export function dailyStatus(today: DrillSet): DailyStatus {
+  const s = load();
+  const done = new Set(s.sets.filter((x) => x.id.startsWith('daily-') && x.completed_at).map((x) => x.id.slice(6)));
+  const mine = s.sets.find((x) => x.id === today.id);
+  let day = Date.parse(today.id.slice(6) + 'T00:00:00Z');
+  if (!done.has(dateOf(day))) day -= DAY_MS;
+  let streak = 0;
+  while (done.has(dateOf(day))) {
+    streak += 1;
+    day -= DAY_MS;
+  }
+  return {
+    date: today.id.slice(6),
+    technique: today.technique,
+    label: today.label,
+    set_id: mine ? mine.id : null,
+    done: !!mine?.completed_at,
+    streak
+  };
+}
+
+/** Start (or resume) today's daily drill. */
+export function startDaily(today: DrillSet): DrillSet {
+  return load().sets.find((x) => x.id === today.id) ?? remember(today);
+}
+
+export function overview(weakTags: string[], daily: DailyStatus): DrillOverview {
   const s = load();
   const since = Date.now() - MONTH_MS;
   const techniques: TechniqueMastery[] = DRILLABLE.map((tag) => {
@@ -52,12 +82,12 @@ export function overview(weakTags: string[]): DrillOverview {
       median_ms: times.length ? times[Math.floor(times.length / 2)] : null
     };
   });
-  const focus = [...weakTags.filter((t) => DRILLABLE.includes(t)), 'hanging_piece', 'fork'].filter((t, i, a) => a.indexOf(t) === i);
   return {
     techniques,
-    focus: focus.slice(0, 3),
+    focus: focusOf(weakTags),
     week_done: s.sets.filter((x) => x.completed_at && x.completed_at >= Date.now() - WEEK_MS).length,
     week_goal: 5,
+    daily,
     recent: s.sets.slice(0, 10).map((x) => ({
       id: x.id,
       technique: x.technique,
@@ -74,7 +104,15 @@ export function overview(weakTags: string[]): DrillOverview {
 /** Which technique a guest set trains. */
 export function guestTag(source: DrillSource, weakTags: string[]): string {
   if (source.kind === 'theme') return source.tag;
-  return overview(weakTags).focus[0];
+  if (source.kind === 'daily') throw new Error('use startDaily');
+  return focusOf(weakTags)[0];
+}
+
+/** Weakest techniques first, then the basics. */
+function focusOf(weakTags: string[]): string[] {
+  return [...weakTags.filter((t) => DRILLABLE.includes(t)), 'hanging_piece', 'fork']
+    .filter((t, i, a) => a.indexOf(t) === i)
+    .slice(0, 3);
 }
 
 export function remember(set: DrillSet): DrillSet {

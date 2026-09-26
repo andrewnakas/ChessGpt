@@ -267,8 +267,10 @@ export const api = routed(
     progress: offline.progress,
     puzzles: async () => ({ due: [], total: 0, due_count: 0, learned: 0 }),
     analysisMotifs: async () => [],
-    drills: async () => guestDrills.overview(await guestWeakTags()),
+    drills: async () =>
+      guestDrills.overview(await guestWeakTags(), guestDrills.dailyStatus(await request<DrillSet>('GET', '/drills/daily'))),
     createDrill: async (source: DrillSource) => {
+      if (source.kind === 'daily') return guestDrills.startDaily(await request<DrillSet>('GET', '/drills/daily'));
       const tag = guestDrills.guestTag(source, await guestWeakTags());
       const rating = (await offline.settings()).elo;
       return guestDrills.remember(await request<DrillSet>('POST', '/drills/try', { tag, rating }));

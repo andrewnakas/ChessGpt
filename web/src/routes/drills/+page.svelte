@@ -66,6 +66,23 @@
 {#if !data && !error}
   <p class="muted">Loading…</p>
 {:else if data}
+  <section class="card pad daily">
+    <div>
+      <h2>Daily drill: {data.daily.label}</h2>
+      <p class="muted small">
+        Five positions, the same for everyone today.
+        {#if data.daily.streak}<b class="streak">🔥 {data.daily.streak}-day streak</b>{:else}Start a streak.{/if}
+      </p>
+    </div>
+    {#if data.daily.done}
+      <a href="/drills/{data.daily.set_id}">✓ Done today — review it</a>
+    {:else}
+      <button class="primary" disabled={!!building} onclick={() => start({ kind: 'daily', date: data!.daily.date }, 'daily')}>
+        {building === 'daily' ? 'Loading…' : data.daily.set_id ? 'Continue' : 'Start'}
+      </button>
+    {/if}
+  </section>
+
   <section class="card pad focus">
     <div>
       <h2>Your focus</h2>
@@ -129,6 +146,18 @@
   }
   .section {
     margin-top: 1.4rem;
+  }
+  .daily {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.8rem;
+    border-color: var(--accent);
+  }
+  .streak {
+    color: var(--accent);
   }
   .focus {
     display: flex;

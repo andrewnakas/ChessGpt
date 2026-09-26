@@ -318,6 +318,25 @@ impl Db {
         Ok(out)
     }
 
+    /// The user's daily-drill sets: (date, set id, finished).
+    pub async fn daily_sets(&self) -> Result<Vec<(String, String, bool)>> {
+        let rows = sqlx::query(
+            "SELECT id, source_json, completed_at FROM drill_sets
+             WHERE user_id = ? AND json_extract(source_json, '$.kind') = 'daily' ORDER BY created_at",
+        )
+        .bind(&self.user_id)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut out = vec![];
+        for r in rows {
+            let src: DrillSource = serde_json::from_str(&r.try_get::<String, _>("source_json")?)?;
+            if let DrillSource::Daily { date } = src {
+                out.push((date, r.try_get("id")?, r.try_get::<Option<i64>, _>("completed_at")?.is_some()));
+            }
+        }
+        Ok(out)
+    }
+
     /// Sets finished in the last 7 days.
     pub async fn drill_sets_finished_this_week(&self) -> Result<u32> {
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM drill_sets WHERE user_id = ? AND completed_at >= ?")

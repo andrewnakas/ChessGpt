@@ -2,7 +2,7 @@
   import '../app.css';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { api, authListeners, mode, type Account, type Mode } from '$lib/api/client';
+  import { api, authListeners, mode, setGuest, type Account, type Mode } from '$lib/api/client';
   import type { Meta } from '$lib/api/types';
   import { coachAvailable, device } from '$lib/llm/device.svelte';
   import { onMount, setContext } from 'svelte';
@@ -15,6 +15,8 @@
     meta: null as Meta | null,
     account: null as Account | null,
     accounts: false,
+    /** Hosted server, not signed in: everything runs in this browser. */
+    guest: false,
     mode: 'server' as Mode,
     refresh: async () => {}
   });
@@ -34,11 +36,14 @@
     }
   }
   app.refresh = async () => {
-    app.mode = await mode();
+    const m = await mode();
     const s = await api.session();
     app.accounts = s.accounts;
     app.account = s.account;
-    if (!s.accounts || s.account) await loadMeta();
+    app.guest = m === 'server' && s.accounts && !s.account;
+    setGuest(app.guest);
+    app.mode = app.guest ? 'browser' : m;
+    await loadMeta();
   };
 
   function toLogin() {
@@ -48,12 +53,8 @@
 
   onMount(() => {
     authListeners.add(toLogin);
-    app
-      .refresh()
-      .then(() => {
-        if (app.accounts && !app.account) toLogin();
-      })
-      .finally(() => (ready = true));
+    // Signed-out visitors are guests (see app.guest), not sent to the login page.
+    app.refresh().finally(() => (ready = true));
     return () => authListeners.delete(toLogin);
   });
 
@@ -91,8 +92,8 @@
   </nav>
   <div class="right muted">
     {#if meta}
-      <span title="{meta.engine_workers} engine workers × {meta.engine_threads} threads">{meta.engine}</span>
-      {#if !coachAvailable(meta.has_provider)}<a class="warn" href="/settings">{meta.device_model ? 'Turn on the coach' : 'No AI provider'}</a>{/if}
+      <span class="engine" title="{meta.engine_workers} engine workers × {meta.engine_threads} threads">{meta.engine}</span>
+      {#if !app.guest && !coachAvailable(meta.has_provider)}<a class="warn" href="/settings">{meta.device_model ? 'Turn on the coach' : 'No AI provider'}</a>{/if}
     {/if}
     {#if app.account}
       <span class="who">{app.account.display_name}</span>
@@ -103,7 +104,13 @@
   </div>
 </header>
 
-{#if app.mode === 'browser'}
+{#if app.guest}
+  <div class="offline guest">
+    <b>You're trying chessgpt as a guest.</b> Stockfish runs in your browser and your games stay on this device.
+    <a href="/login?create=1">Create a free account</a> to keep them everywhere and to get puzzles from your mistakes,
+    drills that learn from your games, and the coach.
+  </div>
+{:else if app.mode === 'browser'}
   <div class="offline">
     <b>Browser mode.</b> The chessgpt server is offline, so Stockfish is running in your browser and games are saved on
     this device. The coach, accounts and the Claude/ChatGPT connector will be back when the server is.
@@ -178,6 +185,8 @@
     max-width: 1500px;
     margin: 0 auto;
     min-height: calc(100vh - 110px);
+    /* Board coordinates can poke a few pixels past the board on phones. */
+    overflow-x: clip;
   }
   footer {
     text-align: center;
@@ -199,12 +208,23 @@
     font-size: 0.8rem;
     padding: 0.15rem 0.5rem;
   }
-  @media (max-width: 640px) {
+  nav a {
+    white-space: nowrap;
+  }
+  @media (max-width: 900px) {
     header {
       flex-wrap: wrap;
-      gap: 0.6rem;
+      gap: 0.4rem 0.8rem;
     }
-    .right {
+    /* Brand and account on the first row, the nav scrolls sideways below. */
+    nav {
+      order: 3;
+      width: 100%;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .engine,
+    .warn {
       display: none;
     }
   }

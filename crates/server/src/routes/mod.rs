@@ -51,6 +51,7 @@ pub fn router(state: AppState) -> Router {
         .route("/puzzles", get(puzzles::queue))
         .route("/puzzles/{id}/attempt", post(puzzles::attempt))
         .route("/drills", get(drills::overview).post(drills::create))
+        .route("/drills/try", post(drills::try_set))
         .route("/drills/{id}", get(drills::get))
         .route("/drills/{id}/items/{item}/attempt", post(drills::attempt))
         .route("/llm/device", get(llm::device))

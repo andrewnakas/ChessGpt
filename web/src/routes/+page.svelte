@@ -2,7 +2,60 @@
   import { goto } from '$app/navigation';
   import { api } from '$lib/api/client';
   import type { GameSummary } from '$lib/api/types';
-  import { onMount } from 'svelte';
+  import { offline } from '$lib/offline/backend';
+  import { getContext, onMount } from 'svelte';
+
+  const app = getContext<{ guest: boolean; account: unknown }>('app');
+
+  // First visit: pull recent games by username in one step.
+  let site = $state<'lichess' | 'chesscom'>('lichess');
+  let username = $state('');
+  let importing = $state(false);
+  async function quickImport(e: Event) {
+    e.preventDefault();
+    const name = username.trim();
+    if (!name) return;
+    importing = true;
+    error = null;
+    try {
+      const r = await api.importGames({ source: site, username: name, max: 20 });
+      if (r.errors.length && !r.games.length) throw new Error(r.errors[0]);
+      for (const g of r.games) {
+        const side = g.white.toLowerCase() === name.toLowerCase() ? 'white' : g.black.toLowerCase() === name.toLowerCase() ? 'black' : null;
+        if (side && !g.user_side) await api.setSide(g.id, side).catch(() => null);
+      }
+      if (r.games[0]) await goto(`/analyse/${r.games[0].id}`);
+    } catch (err) {
+      error = (err as Error).message;
+    } finally {
+      importing = false;
+    }
+  }
+
+  // Games saved in this browser (as a guest) before signing in.
+  let local = $state(0);
+  let moving = $state(false);
+  let moved = $state<string | null>(null);
+  async function countLocal() {
+    if (!app.account) return;
+    local = (await offline.games().catch(() => [])).length;
+  }
+  async function moveLocal() {
+    moving = true;
+    try {
+      const list = await offline.games();
+      const pgns = await Promise.all(list.map((g) => offline.game(g.id).then((d) => d.pgn)));
+      const r = await api.importGames({ source: 'pgn', pgn: pgns.join('\n\n') });
+      for (const g of list) await offline.deleteGame(g.id);
+      moved = `Added ${r.games.length} game${r.games.length === 1 ? '' : 's'} to your account.`;
+      local = 0;
+      games = await api.games();
+    } catch (err) {
+      error = (err as Error).message;
+    } finally {
+      moving = false;
+    }
+  }
 
   let games = $state<GameSummary[]>([]);
   let loading = $state(true);
@@ -12,6 +65,7 @@
   onMount(async () => {
     try {
       games = await api.games();
+      void countLocal();
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -47,21 +101,60 @@
   }
 </script>
 
-<div class="head">
-  <h1>Your games</h1>
-  <input type="text" placeholder="Filter by player or opening" bind:value={filter} />
-  <a href="/import"><button class="primary">Import games</button></a>
-</div>
+{#if loading || games.length}
+  <div class="head">
+    <h1>Your games</h1>
+    <input type="text" placeholder="Filter by player or opening" bind:value={filter} />
+    <a href="/import"><button class="primary">Import games</button></a>
+  </div>
+{/if}
+
+{#if local && !moved}
+  <div class="card movelocal">
+    You have {local} game{local === 1 ? '' : 's'} saved in this browser from before you signed in.
+    <button class="primary" onclick={moveLocal} disabled={moving}>{moving ? 'Adding…' : 'Add them to my account'}</button>
+  </div>
+{/if}
+{#if moved}<p class="ok">{moved}</p>{/if}
 
 {#if loading}
   <p class="muted"><span class="spinner"></span> Loading…</p>
 {:else if error}
   <p class="error">{error}</p>
 {:else if !games.length}
-  <div class="empty card">
-    <h2>Start with a game</h2>
-    <p>Paste a PGN, or pull your recent games from Lichess or Chess.com. chessgpt runs Stockfish over every move, finds the moments that decided the game, and has the coach explain them at your level.</p>
-    <p><a href="/import"><button class="primary">Import games</button></a> or <a href="/board">open the analysis board</a>.</p>
+  <section class="hero">
+    <h2>Get better at chess from your own games.</h2>
+    <p class="lead">
+      Stockfish reviews every move, finds the moments that decided the game, and turns your mistakes into training:
+      puzzles from your own positions, and drills that teach the same idea several ways until it sticks.
+    </p>
+    <form class="quick card" onsubmit={quickImport}>
+      <select bind:value={site} aria-label="Site">
+        <option value="lichess">Lichess</option>
+        <option value="chesscom">Chess.com</option>
+      </select>
+      <input type="text" bind:value={username} placeholder="Your username" autocomplete="username" />
+      <button class="primary" type="submit" disabled={importing || !username.trim()}>
+        {importing ? 'Fetching games…' : 'Review my games'}
+      </button>
+    </form>
+    <p class="muted small">
+      Or <a href="/import">paste a PGN</a>. {#if app.guest}No account needed: it all runs in your browser.{/if}
+    </p>
+  </section>
+  <div class="cards">
+    <a class="card tile" href="/drills">
+      <b>Drill a tactic</b>
+      <span class="muted small">Forks, pins, back-rank mates: spot it, find it, stop it, then convert it against the bot.</span>
+    </a>
+    <a class="card tile" href="/play">
+      <b>Play the bot</b>
+      <span class="muted small">A sparring partner from 600 to 2600 that plays like a human at that level.</span>
+    </a>
+    <a class="card tile" href="/board">
+      <b>Analysis board</b>
+      <span class="muted small">Set up any position and see Stockfish's best lines.</span>
+    </a>
   </div>
 {:else}
   <table class="card">
@@ -128,9 +221,62 @@
   .head a {
     margin-left: auto;
   }
-  .empty {
-    padding: 1.5rem 2rem;
-    max-width: 44rem;
+  .hero {
+    max-width: 46rem;
+    margin: 1rem 0 1.5rem;
+  }
+  .hero h2 {
+    font-size: 1.8rem;
+    margin: 0 0 0.5rem;
+  }
+  .lead {
+    font-size: 1.05rem;
+    line-height: 1.5;
+  }
+  .quick {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.7rem;
+    margin: 1rem 0 0.4rem;
+  }
+  .quick input {
+    flex: 1 1 12rem;
+  }
+  .quick select {
+    width: auto;
+    flex: 0 0 auto;
+  }
+  .small {
+    font-size: 0.85rem;
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 0.8rem;
+    max-width: 46rem;
+  }
+  .tile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.9rem 1rem;
+    color: inherit;
+    text-decoration: none;
+  }
+  .tile:hover {
+    border-color: var(--accent);
+  }
+  .movelocal {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.8rem;
+    align-items: center;
+    padding: 0.7rem 1rem;
+    margin-bottom: 1rem;
+  }
+  .ok {
+    color: var(--ok);
   }
   table {
     width: 100%;

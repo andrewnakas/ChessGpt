@@ -1,6 +1,7 @@
 // Typed API client. Types come from crates/api-types via `cargo xtask gen-types`.
 import { browserEngine } from '../offline/engine';
 import { needsServer, offline } from '../offline/backend';
+import * as guestDrills from '../training/guestDrills';
 import type {
   AnalyseGameRequest,
   AnalyseGameResponse,
@@ -198,6 +199,22 @@ const serverStreams = {
 export type Mode = 'server' | 'browser';
 let modePromise: Promise<Mode> | null = null;
 
+// Guests (hosted server, not signed in) use the browser backend too, like
+// offline mode, but still reach the server for sign-in and guest drills.
+let guest = false;
+export function setGuest(on: boolean) {
+  guest = on;
+}
+export const isGuest = () => guest;
+
+/** Where calls go: the server, or this browser (offline, or a guest). */
+export async function effectiveMode(): Promise<Mode> {
+  return guest ? 'browser' : mode();
+}
+
+/** Calls that always go to the server when it is up. */
+const SERVER_ALWAYS = new Set(['session', 'register', 'login', 'logout', 'shared', 'claim']);
+
 /** Is the chessgpt server reachable? If not, everything runs in the browser. */
 export function mode(): Promise<Mode> {
   modePromise ??= (async () => {
@@ -220,10 +237,13 @@ function routed<S extends Record<string, Fn>>(server: S, local: Partial<{ [K in 
   const out: Record<string, Fn> = {};
   for (const k of Object.keys(server)) {
     out[k] = (async (...args: never[]) => {
-      if ((await mode()) === 'server') return server[k](...args);
+      const m = await mode();
+      if (m === 'server' && (!guest || SERVER_ALWAYS.has(k))) return server[k](...args);
       const f = local[k as keyof S];
       if (f) return f(...args);
-      throw needsServer(what[k as keyof S] ?? 'This feature');
+      const feature = what[k as keyof S] ?? 'This feature';
+      if (guest && m === 'server') throw new Error(`${feature} needs a free account. Sign in or create one to use it.`);
+      throw needsServer(feature);
     }) as Fn;
   }
   return out as S;
@@ -247,6 +267,14 @@ export const api = routed(
     progress: offline.progress,
     puzzles: async () => ({ due: [], total: 0, due_count: 0, learned: 0 }),
     analysisMotifs: async () => [],
+    drills: async () => guestDrills.overview(await guestWeakTags()),
+    createDrill: async (source: DrillSource) => {
+      const tag = guestDrills.guestTag(source, await guestWeakTags());
+      const rating = (await offline.settings()).elo;
+      return guestDrills.remember(await request<DrillSet>('POST', '/drills/try', { tag, rating }));
+    },
+    drill: async (id: string) => guestDrills.get(id),
+    drillAttempt: async (setId: string, itemId: string, a: DrillAttempt) => guestDrills.attempt(setId, itemId, a),
     settings: offline.settings,
     saveSettings: offline.saveSettings,
     providers: async () => [],
@@ -272,9 +300,17 @@ export const api = routed(
   }
 );
 
+async function guestWeakTags(): Promise<string[]> {
+  try {
+    return (await offline.progress()).motifs.map((m) => m.tag);
+  } catch {
+    return [];
+  }
+}
+
 export const streams = {
   engine: async (fen: string, multipv: number, onEvent: (e: EngineEvent) => void, signal: AbortSignal, depth = 30) => {
-    if ((await mode()) === 'server') return serverStreams.engine(fen, multipv, onEvent, signal, depth);
+    if ((await effectiveMode()) === 'server') return serverStreams.engine(fen, multipv, onEvent, signal, depth);
     const a = await browserEngine().analyse(fen, {
       multipv,
       depth: Math.min(depth, 22),
@@ -285,11 +321,11 @@ export const streams = {
     onEvent({ type: 'done', analysis: a });
   },
   job: async (analysisId: string, onEvent: (e: JobEvent) => void, signal: AbortSignal) => {
-    if ((await mode()) === 'server') return serverStreams.job(analysisId, onEvent, signal);
+    if ((await effectiveMode()) === 'server') return serverStreams.job(analysisId, onEvent, signal);
     return offline.jobEvents(analysisId, onEvent, signal);
   },
   chat: async (threadId: string, body: SendMessageRequest, onEvent: (e: ChatEvent) => void, signal: AbortSignal) => {
-    if ((await mode()) === 'server') return serverStreams.chat(threadId, body, onEvent, signal);
+    if ((await effectiveMode()) === 'server') return serverStreams.chat(threadId, body, onEvent, signal);
     throw needsServer('The coach');
   }
 };

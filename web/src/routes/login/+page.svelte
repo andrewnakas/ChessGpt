@@ -10,7 +10,7 @@
     const r = page.url.searchParams.get('return') ?? '/';
     return r.startsWith('/') && !r.startsWith('//') ? r : '/';
   });
-  let mode = $state<'login' | 'register'>('login');
+  let mode = $state<'login' | 'register'>(page.url.searchParams.has('create') ? 'register' : 'login');
   let email = $state('');
   let password = $state('');
   let name = $state('');
@@ -70,6 +70,7 @@
         Have an account? <button class="linkish" onclick={() => (mode = 'login')}>Sign in</button>
       {/if}
     </p>
+    <p class="muted small center"><a href="/">Keep going as a guest</a></p>
   </div>
 </div>
 

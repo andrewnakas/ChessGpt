@@ -4,6 +4,7 @@
 mod accounts;
 mod analysis;
 mod chat;
+mod drills;
 mod oauth;
 mod games;
 mod keyring;
@@ -30,6 +31,7 @@ pub use games::{GameRecord, NewGame};
 pub use keyring::KeyRing;
 pub use providers::ProviderRecord;
 pub use puzzles::NewPuzzle;
+pub use drills::{MasteryRow, MistakeSeed};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {

@@ -367,3 +367,88 @@ async fn linking_a_username_marks_sides() {
     assert_eq!(db.game_summary(&g.id).await.unwrap().user_side, Some(Side::White));
     assert_eq!(db.mark_side_by_name(&white).await.unwrap(), 0, "already marked");
 }
+
+fn drill_item(kind: api_types::DrillKind, fen: &str) -> api_types::DrillItem {
+    api_types::DrillItem {
+        id: String::new(),
+        kind,
+        origin: "bank".into(),
+        fen: fen.into(),
+        prompt: "p".into(),
+        solution_uci: vec!["e2e4".into()],
+        accept_uci: if kind == api_types::DrillKind::Defend { vec!["d2d4".into(), "g1f3".into()] } else { vec![] },
+        trap_san: vec![],
+        line_san: vec!["e4".into()],
+        quiz: None,
+        goal: None,
+        hints: vec![],
+        rating: Some(1500),
+        solved: None,
+    }
+}
+
+#[tokio::test]
+async fn drill_sets_record_results_and_schedule_misses() {
+    use api_types::{DrillAttempt, DrillKind, DrillSource};
+    let db = Db::open_memory().await.unwrap();
+    let f1 = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1";
+    let f2 = "4k3/8/8/8/8/8/3P4/4K3 w - - 0 1";
+    let items = vec![
+        (drill_item(DrillKind::Spot, f1), Some("b1".to_string())),
+        (drill_item(DrillKind::Find, f1), Some("b2".to_string())),
+        (drill_item(DrillKind::Defend, f2), None),
+    ];
+    let set = db.create_drill_set("fork", &DrillSource::Theme { tag: "fork".into() }, 1200, items).await.unwrap();
+    assert_eq!(set.label, "Fork");
+    assert_eq!(set.items.len(), 3);
+    assert!(set.items.iter().all(|i| !i.id.is_empty() && i.solved.is_none()));
+    assert_eq!(db.recent_bank_ids().await.unwrap(), ["b1".to_string(), "b2".to_string()].into());
+
+    let att = |solved, hints_used| DrillAttempt { solved, ms: 4000, hints_used };
+    // A missed spot question is not a puzzle; a missed find is, once.
+    db.record_drill_item(&set.id, &set.items[0].id, &att(false, 0)).await.unwrap();
+    db.record_drill_item(&set.id, &set.items[1].id, &att(false, 1)).await.unwrap();
+    let again = db.record_drill_item(&set.id, &set.items[1].id, &att(true, 0)).await.unwrap();
+    assert_eq!(again.items[1].solved, Some(false), "first attempt counts");
+    assert_eq!(db.due_puzzles(10).await.unwrap().len(), 1);
+    // A solved defence finishes the set and schedules nothing.
+    let done = db.record_drill_item(&set.id, &set.items[2].id, &att(true, 0)).await.unwrap();
+    assert!(done.completed_at.is_some());
+    let due = db.due_puzzles(10).await.unwrap();
+    assert_eq!(due.len(), 1);
+    assert_eq!((due[0].source.as_str(), due[0].themes.clone()), ("drill", vec!["fork".to_string()]));
+
+    let m = db.technique_mastery().await.unwrap();
+    let fork = &m["fork"];
+    assert_eq!((fork.attempted, fork.solved, fork.clean, fork.median_ms), (3, 1, 1, Some(4000)));
+    let recent = db.recent_drill_sets(5).await.unwrap();
+    assert_eq!((recent[0].items, recent[0].attempted, recent[0].solved), (3, 3, 1));
+
+    // A missed defence becomes a puzzle that accepts every holding move.
+    let set2 = db
+        .create_drill_set("fork", &DrillSource::Weakest, 1200, vec![(drill_item(DrillKind::Defend, f2), None)])
+        .await
+        .unwrap();
+    db.record_drill_item(&set2.id, &set2.items[0].id, &att(false, 0)).await.unwrap();
+    let p = db.due_puzzles(10).await.unwrap().into_iter().find(|p| p.fen == f2).unwrap();
+    assert_eq!(p.accept_uci, vec!["d2d4", "g1f3"]);
+    assert_eq!(p.solution_uci, vec!["d2d4"]);
+}
+
+#[tokio::test]
+async fn drill_follow_up_goes_right_after_the_miss() {
+    use api_types::{DrillAttempt, DrillKind, DrillSource};
+    let db = Db::open_memory().await.unwrap();
+    let f = "4k3/8/8/8/8/8/4P3/4K3 w - - 0 1";
+    let items = vec![(drill_item(DrillKind::Find, f), Some("a".to_string())), (drill_item(DrillKind::Spot, f), None)];
+    let set = db.create_drill_set("pin", &DrillSource::Weakest, 1500, items).await.unwrap();
+    let first = set.items[0].id.clone();
+    db.record_drill_item(&set.id, &first, &DrillAttempt { solved: false, ms: 1, hints_used: 0 }).await.unwrap();
+    let mut extra = drill_item(DrillKind::Find, f);
+    extra.prompt = "easier".into();
+    let set = db.insert_drill_item_after(&set.id, &first, extra, Some("b".into())).await.unwrap();
+    assert_eq!(set.items.iter().map(|i| i.prompt.as_str()).collect::<Vec<_>>(), ["p", "easier", "p"]);
+    assert_eq!(set.items[1].kind, DrillKind::Find);
+    assert_eq!(set.items[2].kind, DrillKind::Spot);
+    assert_eq!(db.drill_bank_ids(&set.id).await.unwrap(), ["a".to_string(), "b".to_string()].into());
+}

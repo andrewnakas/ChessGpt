@@ -667,6 +667,30 @@ pub fn line_story(pos: &Chess, san_line: &[impl AsRef<str>], max_plies: usize) -
     out
 }
 
+/// Motifs the side to move uses along a solution (UCI, alternating sides,
+/// solver first): what each of the solver's moves creates, plus pins and
+/// trapped pieces standing on the board before them.
+pub fn solver_motifs(pos: &Chess, solution_uci: &[impl AsRef<str>]) -> Vec<Motif> {
+    let solver = pos.turn();
+    let mut p = pos.clone();
+    let mut out = vec![];
+    for u in solution_uci {
+        let Some(m) = crate::position::uci_to_move(&p, u.as_ref()) else { break };
+        if p.turn() == solver {
+            for h in position_motifs(&p) {
+                if h.by == solver.into() && matches!(h.motif, Motif::Pin | Motif::TrappedPiece) {
+                    out.push(h.motif);
+                }
+            }
+            out.extend(move_motifs(&p, m).into_iter().map(|h| h.motif));
+        }
+        p.play_unchecked(m);
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -736,22 +760,8 @@ mod tests {
         let mut ucis = moves.split_whitespace();
         let first = uci_to_move(&p, ucis.next().unwrap()).unwrap();
         p.play_unchecked(first);
-        let solver = p.turn();
-        let mut set = BTreeSet::new();
-        for u in ucis {
-            let Some(m) = uci_to_move(&p, u) else { break };
-            if p.turn() == solver {
-                for h in position_motifs(&p) {
-                    if h.by == solver.into() && matches!(h.motif, Motif::Pin | Motif::TrappedPiece)
-                    {
-                        set.insert(h.motif);
-                    }
-                }
-                set.extend(move_motifs(&p, m).into_iter().map(|h| h.motif));
-            }
-            p.play_unchecked(m);
-        }
-        set
+        let rest: Vec<&str> = ucis.collect();
+        solver_motifs(&p, &rest).into_iter().collect()
     }
 
     /// Recall against Lichess puzzle themes (the themes are incomplete, so

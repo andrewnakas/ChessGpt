@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { DrawShape } from '@lichess-org/chessground/draw';
   import type { Key } from '@lichess-org/chessground/types';
+  import { goto } from '$app/navigation';
   import { getContext, onMount } from 'svelte';
   import { api } from '$lib/api/client';
   import type { Explanation, Meta, Puzzle, PuzzleQueue } from '$lib/api/types';
@@ -8,6 +9,7 @@
   import { numberedLine, playMove, playUci, tagLabel, turn, uciSquares } from '$lib/chess';
   import { coachAvailable } from '$lib/llm/device.svelte';
   import { LICHESS_THEME, nextLichessPuzzle, type LichessPuzzle } from '$lib/training/lichess';
+  import { accepts, drillableTag } from '$lib/training/drills';
   import { step } from '$lib/training/solve';
 
   const app = getContext<{ meta: Meta | null }>('app');
@@ -28,6 +30,26 @@
   let explaining = $state(false);
   let error = $state<string | null>(null);
   let practised = $state(0);
+  let drilling = $state(false);
+
+  /** The technique a drill set would train from this puzzle. */
+  const drillTag = $derived(
+    current?.kind === 'mine' ? drillableTag(current.p.themes) : current?.kind === 'lichess' ? weakTheme : null
+  );
+
+  async function drill() {
+    if (!current || !drillTag) return;
+    drilling = true;
+    try {
+      const set = await api.createDrill(
+        current.kind === 'mine' ? { kind: 'puzzle', id: current.p.id } : { kind: 'theme', tag: drillTag }
+      );
+      await goto(`/drills/${set.id}`);
+    } catch (e) {
+      error = (e as Error).message;
+      drilling = false;
+    }
+  }
 
   const orientation = $derived(current ? turn(current.p.fen) : 'white');
   const shapes = $derived<DrawShape[]>(
@@ -80,6 +102,19 @@
     if (!current || result) return;
     const played = playMove(fen, orig, dest);
     if (!played) return;
+    // Defence puzzles: any move that holds counts.
+    if (current.kind === 'mine' && current.p.accept_uci.length) {
+      fen = played.fen;
+      lastMove = [orig, dest];
+      if (accepts(current.p.accept_uci, played.uci)) return void finish(true);
+      expected = current.p.accept_uci[0];
+      const start = current.p.fen;
+      setTimeout(() => {
+        fen = start;
+        lastMove = null;
+      }, 600);
+      return void finish(false);
+    }
     const s = step(fen, current.kind === 'mine' ? current.p.solution_uci : current.p.solution, at, played.uci);
     if (s.kind === 'wrong') {
       fen = played.fen;
@@ -150,8 +185,15 @@
     </div>
     <aside class="card pad">
       {#if current.kind === 'mine'}
-        <h2>From your game</h2>
-        <p class="muted small">You went wrong here. Find the move you missed, playing {orientation}.</p>
+        {#if current.p.source === 'drill'}
+          <h2>From a drill</h2>
+          <p class="muted small">
+            {current.p.accept_uci.length ? 'A careless move here walks into a tactic. Play a safe one' : 'Find the move'}, playing {orientation}.
+          </p>
+        {:else}
+          <h2>From your game</h2>
+          <p class="muted small">You went wrong here. Find the move you missed, playing {orientation}.</p>
+        {/if}
         {#if current.p.themes.length}
           <p class="small">{#each current.p.themes as t}<span class="chip">{tagLabel(t)}</span> {/each}</p>
         {/if}
@@ -189,6 +231,11 @@
       {/if}
       {#if result}
         <button class="primary" onclick={next}>Next puzzle</button>
+        {#if result === 'missed' && drillTag}
+          <button onclick={drill} disabled={drilling}>
+            {drilling ? 'Building…' : `Drill ${tagLabel(drillTag).toLowerCase()} ×8`}
+          </button>
+        {/if}
       {/if}
     </aside>
   </div>

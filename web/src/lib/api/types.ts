@@ -209,7 +209,11 @@ source: string, game_id: string | null, analysis_id: string | null, ply: number 
 /**
  * The engine's line from the solution on (SAN), for after solving.
  */
-line_san: Array<string>, themes: Array<string>, reps: number, lapses: number, due_at: number, };
+line_san: Array<string>, themes: Array<string>, 
+/**
+ * When non-empty, any of these first moves solves it (defence puzzles).
+ */
+accept_uci: Array<string>, reps: number, lapses: number, due_at: number, };
 
 export type PuzzleAttempt = { solved: boolean, };
 
@@ -234,6 +238,96 @@ imported: number,
  * Of those, how many are being analysed now.
  */
 analysing: number, errors: Array<string>, };
+
+export type DrillKind = "spot" | "find" | "defend" | "playout";
+
+export type DrillQuiz = { question: string, choices: Array<string>, answer_choice: number | null, answer_squares: Array<string>, 
+/**
+ * A move to draw on the board (UCI).
+ */
+arrow_uci: string | null, 
+/**
+ * Shown after answering.
+ */
+explanation: string, };
+
+export type PlayoutGoal = { moves: number, min_win_pct: number, start_win_pct: number, };
+
+export type DrillItem = { id: string, kind: DrillKind, 
+/**
+ * "variant" (the user's own position, transformed), "bank" (a Lichess puzzle).
+ */
+origin: string, fen: string, prompt: string, 
+/**
+ * Find: the solver's moves and the replies (UCI).
+ */
+solution_uci: Array<string>, 
+/**
+ * Defend: every first move that holds.
+ */
+accept_uci: Array<string>, 
+/**
+ * Defend: the tempting move that walks into it, and the punishing line (SAN).
+ */
+trap_san: Array<string>, 
+/**
+ * The engine's line from the solution, for after solving (SAN).
+ */
+line_san: Array<string>, quiz: DrillQuiz | null, goal: PlayoutGoal | null, 
+/**
+ * Mildest first.
+ */
+hints: Array<string>, 
+/**
+ * Lichess puzzle rating, for bank items.
+ */
+rating: number | null, 
+/**
+ * Not attempted yet: None.
+ */
+solved: boolean | null, };
+
+export type DrillSource = { "kind": "mistake", analysis_id: string, ply: number, } | { "kind": "puzzle", id: string, } | { "kind": "theme", tag: string, } | { "kind": "weakest" };
+
+export type DrillSet = { id: string, 
+/**
+ * Concept tag.
+ */
+technique: string, label: string, source: DrillSource, 
+/**
+ * The game rating the set was pitched at.
+ */
+rating: number, items: Array<DrillItem>, created_at: number, completed_at: number | null, };
+
+export type DrillAttempt = { solved: boolean, ms: number, hints_used: number, };
+
+export type TechniqueMastery = { tag: string, label: string, attempted: number, solved: number, 
+/**
+ * Solved without hints.
+ */
+clean: number, median_ms: number | null, };
+
+export type DrillOverview = { techniques: Array<TechniqueMastery>, 
+/**
+ * Weakest first; what the weekly plan drills.
+ */
+focus: Array<string>, 
+/**
+ * Sets finished in the last 7 days, against the weekly goal.
+ */
+week_done: number, week_goal: number, recent: Array<DrillSetSummary>, };
+
+export type DrillSetSummary = { id: string, technique: string, label: string, items: number, attempted: number, solved: number, created_at: number, completed_at: number | null, };
+
+export type MistakeMotif = { ply: number, 
+/**
+ * Concept tag.
+ */
+tag: string, 
+/**
+ * "missed" (the better line used it), "allowed" (the opponent's reply uses it), "coach".
+ */
+kind: string, };
 
 export type ChatRole = "user" | "assistant";
 

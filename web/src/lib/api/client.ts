@@ -14,6 +14,11 @@ import type {
   GameAnalysis,
   GameDetail,
   GameSummary,
+  DrillAttempt,
+  DrillOverview,
+  DrillSet,
+  DrillSource,
+  MistakeMotif,
   Progress,
   Puzzle,
   PuzzleQueue,
@@ -105,6 +110,12 @@ const serverApi = {
   syncAccounts: () => request<SyncReport>('POST', '/accounts/sync'),
   puzzles: () => request<PuzzleQueue>('GET', '/puzzles'),
   puzzleAttempt: (id: string, solved: boolean) => request<Puzzle>('POST', `/puzzles/${id}/attempt`, { solved }),
+  analysisMotifs: (id: string) => request<MistakeMotif[]>('GET', `/analyses/${id}/motifs`),
+  drills: () => request<DrillOverview>('GET', '/drills'),
+  createDrill: (source: DrillSource) => request<DrillSet>('POST', '/drills', source),
+  drill: (id: string) => request<DrillSet>('GET', `/drills/${id}`),
+  drillAttempt: (setId: string, itemId: string, a: DrillAttempt) =>
+    request<DrillSet>('POST', `/drills/${setId}/items/${itemId}/attempt`, a),
 
   settings: () => request<Settings>('GET', '/settings'),
   saveSettings: (s: SettingsInput) => request<Settings>('PUT', '/settings', s),
@@ -235,6 +246,7 @@ export const api = routed(
     cancelAnalysis: offline.cancelAnalysis,
     progress: offline.progress,
     puzzles: async () => ({ due: [], total: 0, due_count: 0, learned: 0 }),
+    analysisMotifs: async () => [],
     settings: offline.settings,
     saveSettings: offline.saveSettings,
     providers: async () => [],
@@ -253,7 +265,10 @@ export const api = routed(
     createProvider: 'AI providers',
     testProvider: 'AI providers',
     connectChesscom: 'Linking a Chess.com account',
-    syncAccounts: 'Syncing games'
+    syncAccounts: 'Syncing games',
+    drills: 'Technique drills',
+    createDrill: 'Technique drills',
+    drill: 'Technique drills'
   }
 );
 

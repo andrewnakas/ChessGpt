@@ -27,6 +27,7 @@ import torch_xla
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.spmd as xs
 import torch_xla.runtime as xr
+from torch_xla.utils.checkpoint import checkpoint as xla_checkpoint
 
 xr.use_spmd()
 
@@ -83,9 +84,10 @@ def main():
     data = encode(a.data, tokenizer, a.max_len)
 
     model = AutoModelForCausalLM.from_pretrained(a.base, torch_dtype=torch.bfloat16)
-    # preserve_rng_state=False: checkpointing would otherwise look up `torch.xla`
-    # for RNG state, which torch_xla doesn't provide. No dropout, so no RNG needed.
-    model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False, "preserve_rng_state": False})
+    # torch.utils.checkpoint looks up a `torch.xla` device module that torch_xla
+    # doesn't provide; use torch_xla's own checkpoint for the decoder layers.
+    model.gradient_checkpointing_enable()
+    model._set_gradient_checkpointing(enable=True, gradient_checkpointing_func=xla_checkpoint)
     model.enable_input_require_grads()
     model = get_peft_model(
         model,

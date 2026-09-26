@@ -5,7 +5,7 @@
   import { api } from '$lib/api/client';
   import type { Meta } from '$lib/api/types';
   import Board from '$lib/components/Board.svelte';
-  import { START_FEN, dests, playMove, playUci, position, turn, uciSquares, whiteWin } from '$lib/chess';
+  import { START_FEN, dests, playMove, playUci, position, turn, uciSquares, whiteWin , type PromotionRole } from '$lib/chess';
   import { coachAvailable } from '$lib/llm/device.svelte';
   import { browserEngine } from '$lib/offline/engine';
   import { choose, styleFor } from '$lib/training/bot';
@@ -89,9 +89,9 @@
     resultText = 'You resigned.';
   }
 
-  function onmove(orig: Key, dest: Key) {
+  function onmove(orig: Key, dest: Key, promotion?: PromotionRole) {
     if (!playing || thinking || turn(fen) !== side) return;
-    const p = playMove(fen, orig, dest);
+    const p = playMove(fen, orig, dest, promotion);
     if (!p) return;
     fen = p.fen;
     sans = [...sans, p.san];

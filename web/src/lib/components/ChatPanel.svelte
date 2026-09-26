@@ -5,7 +5,7 @@
   import type { ChatMessage, ChatThread, ToolCallView, Verification } from '$lib/api/types';
   import { renderMarkdown } from '$lib/markdown';
   import { getContext } from 'svelte';
-  const appCtx = getContext<{ mode?: string } | undefined>('app');
+  const appCtx = getContext<{ mode?: string; guest?: boolean } | undefined>('app');
 
   interface Props {
     gameId?: string | null;
@@ -220,6 +220,11 @@
           <div class="sugg">
             {#each suggestions as s}<button class="chip" onclick={() => send(s)}>{s}</button>{/each}
           </div>
+        {:else if appCtx?.guest}
+          <p class="muted">
+            The coach needs a free account: <a href="/login?create=1">create one</a> to chat about any position.
+            Stockfish still works here: turn it on below the board.
+          </p>
         {:else if appCtx?.mode === 'browser'}
           <p class="muted">The coach needs the chessgpt server, which is offline right now. Stockfish still works: turn it on below the board.</p>
         {:else}

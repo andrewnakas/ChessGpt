@@ -10,7 +10,7 @@
   import ChatPanel from '$lib/components/ChatPanel.svelte';
   import EngineLines from '$lib/components/EngineLines.svelte';
   import EvalBar from '$lib/components/EvalBar.svelte';
-  import { START_FEN, fmtScore, isValidFen, numberedLine, playMove, playUci, uciSquares, whiteWin, type Played } from '$lib/chess';
+  import { START_FEN, fmtScore, isValidFen, numberedLine, playMove, playUci, uciSquares, whiteWin, type Played , type PromotionRole } from '$lib/chess';
 
   const app = getContext<{ meta: Meta | null }>('app');
 
@@ -69,8 +69,8 @@
     return { win: 50, label: '' };
   });
 
-  function onmove(orig: Key, dest: Key) {
-    const r = playMove(fen, orig, dest);
+  function onmove(orig: Key, dest: Key, promotion?: PromotionRole) {
+    const r = playMove(fen, orig, dest, promotion);
     if (!r) return;
     toolShapes = [];
     if (line[cursor]?.uci === r.uci) cursor += 1;

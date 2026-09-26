@@ -7,7 +7,7 @@
   import { api } from '$lib/api/client';
   import type { DrillSet } from '$lib/api/types';
   import Board from '$lib/components/Board.svelte';
-  import { dests, numberedLine, playMove, playUci, position, turn, uciSquares, whiteWin } from '$lib/chess';
+  import { dests, numberedLine, playMove, playUci, position, turn, uciSquares, whiteWin , type PromotionRole } from '$lib/chess';
   import { browserEngine } from '$lib/offline/engine';
   import { choose as botChoose, styleFor } from '$lib/training/bot';
   import { KIND_LABEL, accepts, gradeChoice, gradeTap, tally } from '$lib/training/drills';
@@ -172,9 +172,9 @@
     }
   }
 
-  function onmove(orig: Key, dest: Key) {
+  function onmove(orig: Key, dest: Key, promotion?: PromotionRole) {
     if (!item || result || !moveItem || thinking) return;
-    const played = playMove(fen, orig, dest);
+    const played = playMove(fen, orig, dest, promotion);
     if (!played) return;
     if (item.kind === 'playout') {
       fen = played.fen;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { START_FEN, dests, fmtScore, numberedLine, playMove, playSan, playUci, whiteWin } from './chess';
+import { START_FEN, dests, isPromotion, fmtScore, numberedLine, playMove, playSan, playUci, whiteWin } from './chess';
 
 describe('chess helpers', () => {
   it('generates start position dests', () => {
@@ -41,5 +41,13 @@ describe('chess helpers', () => {
     expect(whiteWin({ kind: 'mate', value: 3 })).toBeCloseTo(97.54, 1);
     expect(fmtScore({ kind: 'cp', value: -35 })).toBe('-0.3');
     expect(fmtScore({ kind: 'mate', value: -2 })).toBe('#-2');
+  });
+
+  it('promotes to the piece picked', () => {
+    const fen = '8/P7/8/8/8/8/8/k6K w - - 0 1';
+    expect(isPromotion(fen, 'a7', 'a8')).toBe(true);
+    expect(isPromotion(fen, 'h1', 'g1')).toBe(false);
+    expect(playMove(fen, 'a7', 'a8', 'knight')).toMatchObject({ san: 'a8=N', uci: 'a7a8n' });
+    expect(playMove(fen, 'a7', 'a8')?.uci).toBe('a7a8q');
   });
 });

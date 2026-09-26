@@ -346,6 +346,152 @@ pub struct Progress {
     pub phases: Vec<PhaseRate>,
 }
 
+// ---------------------------------------------------------------- drills
+
+/// How a drill item trains its technique.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum DrillKind {
+    /// Recognise it: answer a question about the position, no move played.
+    Spot,
+    /// Play it: find the moves.
+    Find,
+    /// Stop it: a careless move here walks into the technique; play a safe one.
+    Defend,
+    /// Use it: play the position out against the bot.
+    Playout,
+}
+
+/// A recognition question. Tap a square (`answer_squares`) or pick one of
+/// `choices` (`answer_choice`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DrillQuiz {
+    pub question: String,
+    pub choices: Vec<String>,
+    pub answer_choice: Option<u32>,
+    pub answer_squares: Vec<String>,
+    /// A move to draw on the board (UCI).
+    pub arrow_uci: Option<String>,
+    /// Shown after answering.
+    pub explanation: String,
+}
+
+/// Play `moves` of your own moves against the bot and keep your winning
+/// chances at or above `min_win_pct`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct PlayoutGoal {
+    pub moves: u32,
+    pub min_win_pct: f64,
+    pub start_win_pct: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DrillItem {
+    pub id: String,
+    pub kind: DrillKind,
+    /// "variant" (the user's own position, transformed), "bank" (a Lichess puzzle).
+    pub origin: String,
+    pub fen: String,
+    pub prompt: String,
+    /// Find: the solver's moves and the replies (UCI).
+    pub solution_uci: Vec<String>,
+    /// Defend: every first move that holds.
+    pub accept_uci: Vec<String>,
+    /// Defend: the tempting move that walks into it, and the punishing line (SAN).
+    pub trap_san: Vec<String>,
+    /// The engine's line from the solution, for after solving (SAN).
+    pub line_san: Vec<String>,
+    pub quiz: Option<DrillQuiz>,
+    pub goal: Option<PlayoutGoal>,
+    /// Mildest first.
+    pub hints: Vec<String>,
+    /// Lichess puzzle rating, for bank items.
+    pub rating: Option<u32>,
+    /// Not attempted yet: None.
+    pub solved: Option<bool>,
+}
+
+/// What a drill set was made from.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DrillSource {
+    /// A mistake in an analysed game.
+    Mistake { analysis_id: String, ply: u32 },
+    /// A training puzzle.
+    Puzzle { id: String },
+    /// A technique by name (a concept tag).
+    Theme { tag: String },
+    /// The user's weakest technique.
+    Weakest,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DrillSet {
+    pub id: String,
+    /// Concept tag.
+    pub technique: String,
+    pub label: String,
+    pub source: DrillSource,
+    /// The game rating the set was pitched at.
+    pub rating: u32,
+    pub items: Vec<DrillItem>,
+    pub created_at: i64,
+    pub completed_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DrillAttempt {
+    pub solved: bool,
+    pub ms: u32,
+    pub hints_used: u32,
+}
+
+/// A motif behind one of the user's mistakes in an analysis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct MistakeMotif {
+    pub ply: u32,
+    /// Concept tag.
+    pub tag: String,
+    /// "missed" (the better line used it), "allowed" (the opponent's reply uses it), "coach".
+    pub kind: String,
+}
+
+/// Drill results for one technique over the last 30 days.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct TechniqueMastery {
+    pub tag: String,
+    pub label: String,
+    pub attempted: u32,
+    pub solved: u32,
+    /// Solved without hints.
+    pub clean: u32,
+    pub median_ms: Option<u32>,
+}
+
+/// The techniques that can be drilled, with the user's results.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DrillOverview {
+    pub techniques: Vec<TechniqueMastery>,
+    /// Weakest first; what the weekly plan drills.
+    pub focus: Vec<String>,
+    /// Sets finished in the last 7 days, against the weekly goal.
+    pub week_done: u32,
+    pub week_goal: u32,
+    pub recent: Vec<DrillSetSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DrillSetSummary {
+    pub id: String,
+    pub technique: String,
+    pub label: String,
+    pub items: u32,
+    pub attempted: u32,
+    pub solved: u32,
+    pub created_at: i64,
+    pub completed_at: Option<i64>,
+}
+
 // ---------------------------------------------------------------- linked accounts
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -381,6 +527,8 @@ pub struct Puzzle {
     /// The engine's line from the solution on (SAN), for after solving.
     pub line_san: Vec<String>,
     pub themes: Vec<String>,
+    /// When non-empty, any of these first moves solves it (defence puzzles).
+    pub accept_uci: Vec<String>,
     pub reps: u32,
     pub lapses: u32,
     pub due_at: i64,
@@ -676,6 +824,8 @@ pub fn typescript() -> String {
         AnalyseGameRequest, AnalyseGameResponse, JobStage, JobEvent,
         ImportRequest, ImportResponse, DeviceModel, LlmRelayRequest,
         ProgressGame, MotifRate, PhaseRate, Progress, Puzzle, PuzzleAttempt, PuzzleQueue, ConnectRequest, SyncReport,
+        DrillKind, DrillQuiz, PlayoutGoal, DrillItem, DrillSource, DrillSet, DrillAttempt, TechniqueMastery,
+        DrillOverview, DrillSetSummary, MistakeMotif,
         ChatRole, ToolCallView, ChatMessage, ChatThread, ChatThreadDetail,
         CreateThreadRequest, SendMessageRequest, ChatEvent,
         ProviderKind, Provider, ProviderInput, ProviderTestResult, Settings, SettingsInput, Meta, ApiError,

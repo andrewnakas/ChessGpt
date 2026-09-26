@@ -13,8 +13,10 @@
     shapes?: DrawShape[];
     interactive?: boolean;
     onmove?: (orig: Key, dest: Key) => void;
+    /** A square was clicked (also when the board is not interactive). */
+    onselect?: (square: Key) => void;
   }
-  let { fen, orientation = 'white', lastMove = null, shapes = [], interactive = true, onmove }: Props = $props();
+  let { fen, orientation = 'white', lastMove = null, shapes = [], interactive = true, onmove, onselect }: Props = $props();
 
   let el: HTMLDivElement;
   let cg: Api | undefined;
@@ -45,6 +47,7 @@
         animation: { enabled: true, duration: 180 },
         highlight: { lastMove: true, check: true },
         premovable: { enabled: false },
+        events: { select: (key: Key) => onselect?.(key) },
         movable: {
           ...config().movable,
           events: { after: (orig: Key, dest: Key) => onmove?.(orig, dest) }

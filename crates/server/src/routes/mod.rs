@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod chat;
+pub mod drills;
 pub mod engine;
 pub mod games;
 pub mod llm;
@@ -34,6 +35,7 @@ pub fn router(state: AppState) -> Router {
         .route("/analyses/{id}/events", get(games::events))
         .route("/analyses/{id}/cancel", post(games::cancel))
         .route("/analyses/{id}/explain/{ply}", post(games::explain_ply))
+        .route("/analyses/{id}/motifs", get(drills::analysis_motifs))
         .route("/settings", get(settings::get).put(settings::put))
         .route("/providers", get(settings::providers).post(settings::create_provider))
         .route("/providers/{id}", put(settings::update_provider).delete(settings::delete_provider))
@@ -48,6 +50,9 @@ pub fn router(state: AppState) -> Router {
         .route("/accounts/sync", post(accounts::sync_now))
         .route("/puzzles", get(puzzles::queue))
         .route("/puzzles/{id}/attempt", post(puzzles::attempt))
+        .route("/drills", get(drills::overview).post(drills::create))
+        .route("/drills/{id}", get(drills::get))
+        .route("/drills/{id}/items/{item}/attempt", post(drills::attempt))
         .route("/llm/device", get(llm::device))
         .route("/llm/relay/{id}", post(llm::relay_reply));
     Router::new()

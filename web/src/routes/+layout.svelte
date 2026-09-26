@@ -70,6 +70,7 @@
     { href: '/board', label: 'Board' },
     { href: '/progress', label: 'Progress' },
     { href: '/train', label: 'Train' },
+    { href: '/drills', label: 'Drills' },
     { href: '/play', label: 'Play' },
     { href: '/connect', label: 'Claude & ChatGPT' },
     { href: '/settings', label: 'Settings' }

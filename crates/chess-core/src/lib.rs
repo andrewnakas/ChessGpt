@@ -10,6 +10,7 @@ pub mod position;
 pub mod rating;
 pub mod score;
 pub mod srs;
+pub mod variants;
 pub mod winpct;
 
 pub use classify::{Classification, Judgement};

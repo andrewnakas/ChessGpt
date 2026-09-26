@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { coachAvailable } from '$lib/llm/device.svelte';
   import type { DrawShape } from '@lichess-org/chessground/draw';
   import type { Key } from '@lichess-org/chessground/types';
   import { getContext, onMount } from 'svelte';
   import { SvelteSet } from 'svelte/reactivity';
+  import { drillableTag } from '$lib/training/drills';
   import { api, streams } from '$lib/api/client';
   import type {
     EngineAnalysis,
@@ -14,6 +16,7 @@
     JobEvent,
     JobStage,
     Meta,
+    MistakeMotif,
     MoveEval,
     Side
   } from '$lib/api/types';
@@ -194,6 +197,36 @@
   });
   const movePath = $derived([...(game?.moves.slice(0, ply).map((m) => m.san) ?? []), ...variation.map((v) => v.san)]);
   const currentMove = $derived(ply > 0 && !variation.length ? evals.get(ply) : undefined);
+
+  // A drill set on the idea behind the user's own mistake.
+  let drilling = $state(false);
+  let drillError = $state<string | null>(null);
+  let motifs = $state<MistakeMotif[]>([]);
+  let motifsFor = '';
+  $effect(() => {
+    const id = analysis?.status === 'done' ? analysis.id : null;
+    if (!id || motifsFor === id) return;
+    motifsFor = id;
+    api.analysisMotifs(id).then((m) => (motifs = m)).catch(() => (motifs = []));
+  });
+  const drill = $derived.by(() => {
+    if (!currentMove || !isError(currentMove.classification)) return null;
+    const at = motifs.filter((m) => m.ply === currentMove.ply);
+    const tag = drillableTag(at.map((m) => m.tag));
+    return tag ? { tag, walkedInto: at.find((m) => m.tag === tag)?.kind === 'allowed' } : null;
+  });
+  async function drillThis() {
+    if (!analysis || !currentMove) return;
+    drilling = true;
+    drillError = null;
+    try {
+      const set = await api.createDrill({ kind: 'mistake', analysis_id: analysis.id, ply: currentMove.ply });
+      await goto(`/drills/${set.id}`);
+    } catch (e) {
+      drillError = (e as Error).message;
+      drilling = false;
+    }
+  }
   const exploring = $derived(variation.length > 0 || future.length > 0);
 
   const shapes: DrawShape[] = $derived.by(() => {
@@ -560,6 +593,17 @@
             onexplain={explainNow}
             onshowline={showLine}
           />
+          {#if drill}
+            <div class="drill">
+              <button onclick={drillThis} disabled={drilling}>
+                {drilling ? 'Building a drill…' : `Drill ${tagLabel(drill.tag).toLowerCase()}`}
+              </button>
+              <span class="muted small">
+                {drillError ??
+                  `You ${drill.walkedInto ? 'walked into' : 'missed'} a ${tagLabel(drill.tag).toLowerCase()} here. Train it in a set of about 8 positions.`}
+              </span>
+            </div>
+          {/if}
         {:else if exploring}
           <p class="muted">You are exploring a line. Ask the coach about it below, or turn on Stockfish (space).</p>
         {:else if analysis?.key_moments.length}
@@ -588,6 +632,15 @@
 {/if}
 
 <style>
+  .drill {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.8rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+  }
   .layout {
     display: grid;
     grid-template-columns: minmax(320px, min(calc(100vh - 150px), 680px)) minmax(340px, 1fr);

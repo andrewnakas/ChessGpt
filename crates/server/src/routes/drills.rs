@@ -144,6 +144,86 @@ pub async fn create(UserState(state, _): UserState, Json(source): Json<DrillSour
     Ok(Json(state.db.create_drill_set(&technique, &source, rating, items).await?))
 }
 
+/// Guest drills: build a set on a technique without an account. Nothing is
+/// stored; the browser keeps the set and grades it. Engine time is shared, so
+/// each address gets a few sets an hour and only two build at once.
+pub async fn try_set(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    headers: axum::http::HeaderMap,
+    Json(req): Json<GuestDrillRequest>,
+) -> ApiResult<Json<DrillSet>> {
+    if !drillable(&req.tag) {
+        return Err(AppError::bad_request(format!("{} can't be drilled", req.tag)));
+    }
+    let ip = headers
+        .get("cf-connecting-ip")
+        .or_else(|| headers.get("x-forwarded-for"))
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.split(',').next().unwrap_or("").trim().to_string())
+        .unwrap_or_default();
+    if !guest_allowance(&ip) {
+        return Err(AppError(
+            axum::http::StatusCode::TOO_MANY_REQUESTS,
+            "That's the guest limit for this hour. Create a free account to keep drilling.".into(),
+        ));
+    }
+    let _permit = guest_slots().acquire().await.map_err(|_| AppError::unavailable("busy"))?;
+    let rating = req.rating.unwrap_or(1200).clamp(400, 2800);
+    let draft = DrillRequest { technique: req.tag.clone(), rating, seed: None, exclude: Default::default(), rng: db::now_ms() as u64 };
+    let items = compose(&state.pool, Bank::builtin(), &draft).await?;
+    if items.is_empty() {
+        return Err(AppError::unavailable("could not build a drill set"));
+    }
+    let items = items
+        .into_iter()
+        .enumerate()
+        .map(|(n, d)| api_types::DrillItem { id: format!("g{n}"), ..d.item })
+        .collect();
+    Ok(Json(DrillSet {
+        id: format!("guest-{}", db::now_ms()),
+        label: coach::tags::label(&req.tag),
+        technique: req.tag.clone(),
+        source: DrillSource::Theme { tag: req.tag },
+        rating,
+        items,
+        created_at: db::now_ms(),
+        completed_at: None,
+    }))
+}
+
+#[derive(serde::Deserialize)]
+pub struct GuestDrillRequest {
+    tag: String,
+    rating: Option<u32>,
+}
+
+/// Guest sets per address per hour.
+const GUEST_PER_HOUR: usize = 6;
+
+fn guest_allowance(ip: &str) -> bool {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+    static SEEN: OnceLock<Mutex<HashMap<String, Vec<Instant>>>> = OnceLock::new();
+    let mut seen = SEEN.get_or_init(Default::default).lock().unwrap();
+    let hour = Duration::from_secs(3600);
+    seen.retain(|_, v| {
+        v.retain(|t| t.elapsed() < hour);
+        !v.is_empty()
+    });
+    let v = seen.entry(ip.to_string()).or_default();
+    if v.len() >= GUEST_PER_HOUR {
+        return false;
+    }
+    v.push(Instant::now());
+    true
+}
+
+fn guest_slots() -> &'static tokio::sync::Semaphore {
+    static SLOTS: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SLOTS.get_or_init(|| tokio::sync::Semaphore::new(2))
+}
+
 pub async fn get(UserState(state, _): UserState, Path(id): Path<String>) -> ApiResult<Json<DrillSet>> {
     Ok(Json(state.db.drill_set(&id).await?))
 }

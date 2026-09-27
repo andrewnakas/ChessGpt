@@ -423,6 +423,8 @@ pub enum DrillSource {
     Theme { tag: String },
     /// The user's weakest technique.
     Weakest,
+    /// The daily drill: the same set for everyone on a UTC date (YYYY-MM-DD).
+    Daily { date: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -444,6 +446,21 @@ pub struct DrillAttempt {
     pub solved: bool,
     pub ms: u32,
     pub hints_used: u32,
+}
+
+/// Today's daily drill and the user's streak.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct DailyStatus {
+    /// UTC date, YYYY-MM-DD.
+    pub date: String,
+    pub technique: String,
+    pub label: String,
+    /// Today's set, once started.
+    pub set_id: Option<String>,
+    pub done: bool,
+    /// Consecutive days with the daily drill finished, up to today (or
+    /// yesterday, when today's is still open).
+    pub streak: u32,
 }
 
 /// A motif behind one of the user's mistakes in an analysis.
@@ -477,6 +494,7 @@ pub struct DrillOverview {
     /// Sets finished in the last 7 days, against the weekly goal.
     pub week_done: u32,
     pub week_goal: u32,
+    pub daily: DailyStatus,
     pub recent: Vec<DrillSetSummary>,
 }
 
@@ -825,7 +843,7 @@ pub fn typescript() -> String {
         ImportRequest, ImportResponse, DeviceModel, LlmRelayRequest,
         ProgressGame, MotifRate, PhaseRate, Progress, Puzzle, PuzzleAttempt, PuzzleQueue, ConnectRequest, SyncReport,
         DrillKind, DrillQuiz, PlayoutGoal, DrillItem, DrillSource, DrillSet, DrillAttempt, TechniqueMastery,
-        DrillOverview, DrillSetSummary, MistakeMotif,
+        DrillOverview, DrillSetSummary, MistakeMotif, DailyStatus,
         ChatRole, ToolCallView, ChatMessage, ChatThread, ChatThreadDetail,
         CreateThreadRequest, SendMessageRequest, ChatEvent,
         ProviderKind, Provider, ProviderInput, ProviderTestResult, Settings, SettingsInput, Meta, ApiError,

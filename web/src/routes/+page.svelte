@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { api } from '$lib/api/client';
-  import type { GameSummary } from '$lib/api/types';
+  import type { DailyStatus, GameSummary } from '$lib/api/types';
   import { offline } from '$lib/offline/backend';
   import { getContext, onMount } from 'svelte';
 
@@ -31,6 +31,8 @@
       importing = false;
     }
   }
+
+  let daily = $state<DailyStatus | null>(null);
 
   // Games saved in this browser (as a guest) before signing in.
   let local = $state(0);
@@ -66,6 +68,7 @@
     try {
       games = await api.games();
       void countLocal();
+      api.drills().then((d) => (daily = d.daily)).catch(() => null);
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -117,6 +120,15 @@
 {/if}
 {#if moved}<p class="ok">{moved}</p>{/if}
 
+{#if daily && games.length}
+  <a class="card dailybar" href="/drills">
+    <span><b>Today's drill: {daily.label}</b> · 5 positions</span>
+    <span class="muted">
+      {#if daily.done}✓ done{:else if daily.streak}🔥 {daily.streak}-day streak, keep it going{:else}start a streak{/if} →
+    </span>
+  </a>
+{/if}
+
 {#if loading}
   <p class="muted"><span class="spinner"></span> Loading…</p>
 {:else if error}
@@ -144,7 +156,7 @@
   </section>
   <div class="cards">
     <a class="card tile" href="/drills">
-      <b>Drill a tactic</b>
+      <b>{daily ? `Today's drill: ${daily.label}` : 'Drill a tactic'}</b>
       <span class="muted small">Forks, pins, back-rank mates: spot it, find it, stop it, then convert it against the bot.</span>
     </a>
     <a class="card tile" href="/play">
@@ -265,6 +277,19 @@
     text-decoration: none;
   }
   .tile:hover {
+    border-color: var(--accent);
+  }
+  .dailybar {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.6rem 1rem;
+    margin-bottom: 1rem;
+    color: inherit;
+    text-decoration: none;
+  }
+  .dailybar:hover {
     border-color: var(--accent);
   }
   .movelocal {

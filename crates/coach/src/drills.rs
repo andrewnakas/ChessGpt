@@ -167,6 +167,10 @@ pub async fn variant_items(
 /// A bank puzzle as a find-the-moves item.
 pub fn find_item(p: &BankPuzzle, technique: &str) -> Option<DrillItem> {
     let (fen, solution) = p.solving()?;
+    // The board promotes to a queen; an underpromotion can't be played.
+    if solution.iter().step_by(2).any(|u| u.len() == 5 && !u.ends_with('q')) {
+        return None;
+    }
     let pos = parse_fen(&fen).ok()?;
     let mut item = blank(
         DrillKind::Find,
@@ -386,6 +390,99 @@ pub async fn playout_item(pool: &EnginePool, p: &BankPuzzle, technique: &str) ->
     Ok(Some(item))
 }
 
+/// Techniques the daily drill rotates through: ones with a clear tactic.
+pub const DAILY: &[&str] = &[
+    "fork",
+    "pin",
+    "hanging_piece",
+    "skewer",
+    "discovered_attack",
+    "back_rank",
+    "mating_attack",
+    "trapped_piece",
+    "deflection",
+    "promotion",
+    "decoy",
+];
+
+/// Days since 1970-01-01 (UTC) for a unix time in ms.
+pub fn day_of(ms: i64) -> i64 {
+    ms.div_euclid(86_400_000)
+}
+
+/// "YYYY-MM-DD" for a day number (Howard Hinnant's civil_from_days).
+pub fn date_of(day: i64) -> String {
+    let z = day + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// The day number of a "YYYY-MM-DD" date.
+pub fn day_of_date(date: &str) -> Option<i64> {
+    let mut it = date.split('-').map(|x| x.parse::<i64>().ok());
+    let (y, m, d) = (it.next()??, it.next()??, it.next()??);
+    if !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+        return None;
+    }
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = if m > 2 { m - 3 } else { m + 9 };
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let day = era * 146_097 + doe - 719_468;
+    (date_of(day) == date).then_some(day)
+}
+
+pub fn daily_technique(day: i64) -> &'static str {
+    DAILY[day.rem_euclid(DAILY.len() as i64) as usize]
+}
+
+/// The daily drill: 2 recognition questions and 3 positions on a rating
+/// ladder, all from the bank, so it is the same for everyone and needs no engine.
+pub fn daily(bank: &Bank, day: i64) -> Vec<ItemDraft> {
+    let t = daily_technique(day);
+    let Some(themes) = themes_for(t) else { return vec![] };
+    let mut used = HashSet::new();
+    let mut rng = mix(day as u64);
+    let mut out = vec![];
+    let mut take = |rating: i32, make: &dyn Fn(&BankPuzzle, u64) -> Option<DrillItem>, used: &mut HashSet<String>| {
+        for _ in 0..6 {
+            rng = mix(rng);
+            let Some(p) = bank.pick(themes, rating, used, rng) else { return };
+            used.insert(p.id.clone());
+            if let Some(item) = make(p, rng) {
+                out.push(ItemDraft { item, bank_id: Some(p.id.clone()) });
+                return;
+            }
+        }
+    };
+    take(1100, &|p, _| piece_quiz(p, t), &mut used);
+    take(1400, &|p, r| idea_quiz(p, t, r), &mut used);
+    for rating in [1200, 1500, 1800] {
+        take(rating, &|p, _| find_item(p, t), &mut used);
+    }
+    out
+}
+
+/// Consecutive finished days ending today, or yesterday while today is open.
+pub fn streak(done_days: &HashSet<i64>, today: i64) -> u32 {
+    let mut day = if done_days.contains(&today) { today } else { today - 1 };
+    let mut n = 0;
+    while done_days.contains(&day) {
+        n += 1;
+        day -= 1;
+    }
+    n
+}
+
 /// Most items a set grows to with easier follow-ups.
 pub const MAX_ITEMS: usize = 12;
 
@@ -515,6 +612,20 @@ mod tests {
     }
 
     #[test]
+    fn underpromotions_are_skipped() {
+        let p = BankPuzzle {
+            id: "u".into(),
+            fen: "4k3/1P6/8/8/8/8/8/4K3 b - - 0 1".into(),
+            moves: vec!["e8d7".into(), "b7b8n".into()],
+            rating: 1000,
+            themes: vec!["promotion".into()],
+        };
+        assert!(find_item(&p, "promotion").is_none());
+        let q = BankPuzzle { moves: vec!["e8d7".into(), "b7b8q".into()], ..p };
+        assert!(find_item(&q, "promotion").is_some());
+    }
+
+    #[test]
     fn idea_quiz_answer_is_the_technique() {
         for rng in 0..10 {
             let item = idea_quiz(&fork_puzzle(), "fork", rng).unwrap();
@@ -540,6 +651,39 @@ mod tests {
         };
         let q = piece_quiz(&p, "hanging_piece").unwrap().quiz.unwrap();
         assert_eq!(q.answer_squares, vec!["d5"]);
+    }
+
+    #[test]
+    fn dates_round_trip() {
+        assert_eq!(date_of(0), "1970-01-01");
+        assert_eq!(date_of(day_of(1_790_459_469_227)), "2026-09-26");
+        for day in [-1000, 0, 11_016, 20_000, 20_722, 30_000] {
+            assert_eq!(day_of_date(&date_of(day)), Some(day));
+        }
+        assert_eq!(day_of_date("2026-02-30"), None);
+        assert_eq!(day_of_date("nope"), None);
+    }
+
+    #[test]
+    fn daily_is_the_same_for_everyone_and_rotates() {
+        let bank = Bank::builtin();
+        let a = daily(bank, 20_722);
+        let b = daily(bank, 20_722);
+        assert_eq!(a.len(), 5);
+        assert_eq!(a.iter().map(|d| d.item.fen.clone()).collect::<Vec<_>>(), b.iter().map(|d| d.item.fen.clone()).collect::<Vec<_>>());
+        assert_ne!(daily_technique(20_722), daily_technique(20_723));
+        for day in 20_000..20_000 + DAILY.len() as i64 {
+            assert_eq!(daily(bank, day).len(), 5, "{}", daily_technique(day));
+        }
+    }
+
+    #[test]
+    fn streaks_count_back_from_today_or_yesterday() {
+        let done: HashSet<i64> = [10, 9, 8, 6].into();
+        assert_eq!(streak(&done, 10), 3);
+        assert_eq!(streak(&done, 11), 3, "today still open");
+        assert_eq!(streak(&done, 12), 0);
+        assert_eq!(streak(&HashSet::new(), 5), 0);
     }
 
     #[test]

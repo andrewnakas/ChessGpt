@@ -2,11 +2,13 @@
 
 use std::collections::BTreeMap;
 
-use api_types::{DrillAttempt, DrillKind, DrillOverview, DrillSet, DrillSource, MistakeMotif, TechniqueMastery};
+use api_types::{DailyStatus, DrillAttempt, DrillKind, DrillOverview, DrillSet, DrillSource, MistakeMotif, TechniqueMastery};
 use axum::Json;
 use axum::extract::Path;
 use coach::bank::{Bank, TECHNIQUES};
-use coach::drills::{DrillRequest, MAX_ITEMS, Seed, compose, drillable, easier_find};
+use coach::drills::{
+    DrillRequest, MAX_ITEMS, Seed, compose, daily, daily_technique, date_of, day_of, day_of_date, drillable, easier_find, streak,
+};
 
 use crate::auth::UserState;
 use crate::error::{ApiResult, AppError};
@@ -56,6 +58,47 @@ async fn focus(state: &AppState, rating: u32) -> ApiResult<Vec<String>> {
     Ok(out)
 }
 
+/// Today's daily drill for the user: started?, finished?, and the streak.
+async fn daily_status(state: &AppState) -> ApiResult<DailyStatus> {
+    let today = day_of(db::now_ms());
+    let date = date_of(today);
+    let sets = state.db.daily_sets().await?;
+    let done: std::collections::HashSet<i64> =
+        sets.iter().filter(|(_, _, f)| *f).filter_map(|(d, _, _)| day_of_date(d)).collect();
+    let mine = sets.iter().find(|(d, _, _)| *d == date);
+    let technique = daily_technique(today);
+    Ok(DailyStatus {
+        label: coach::tags::label(technique),
+        technique: technique.into(),
+        set_id: mine.map(|(_, id, _)| id.clone()),
+        done: mine.is_some_and(|(_, _, f)| *f),
+        streak: streak(&done, today),
+        date,
+    })
+}
+
+/// Today's daily drill (the same for everyone), for guests to play in the browser.
+pub async fn daily_public() -> ApiResult<Json<DrillSet>> {
+    let today = day_of(db::now_ms());
+    let date = date_of(today);
+    let technique = daily_technique(today);
+    let items = daily(Bank::builtin(), today)
+        .into_iter()
+        .enumerate()
+        .map(|(n, d)| api_types::DrillItem { id: format!("g{n}"), ..d.item })
+        .collect();
+    Ok(Json(DrillSet {
+        id: format!("daily-{date}"),
+        label: coach::tags::label(technique),
+        technique: technique.into(),
+        source: DrillSource::Daily { date },
+        rating: 1500,
+        items,
+        created_at: db::now_ms(),
+        completed_at: None,
+    }))
+}
+
 pub async fn overview(UserState(state, _): UserState) -> ApiResult<Json<DrillOverview>> {
     let rating = player_rating(&state).await?;
     let mastery = state.db.technique_mastery().await?;
@@ -78,11 +121,24 @@ pub async fn overview(UserState(state, _): UserState) -> ApiResult<Json<DrillOve
         focus: focus(&state, rating).await?,
         week_done: state.db.drill_sets_finished_this_week().await?,
         week_goal: WEEK_GOAL,
+        daily: daily_status(&state).await?,
         recent: state.db.recent_drill_sets(10).await?,
     }))
 }
 
 pub async fn create(UserState(state, _): UserState, Json(source): Json<DrillSource>) -> ApiResult<Json<DrillSet>> {
+    if let DrillSource::Daily { date } = &source {
+        let today = day_of(db::now_ms());
+        if *date != date_of(today) {
+            return Err(AppError::bad_request("only today's daily drill can be started"));
+        }
+        // One daily set per day: starting it again resumes it.
+        if let Some((_, id, _)) = state.db.daily_sets().await?.into_iter().find(|(d, _, _)| d == date) {
+            return Ok(Json(state.db.drill_set(&id).await?));
+        }
+        let items = daily(Bank::builtin(), today).into_iter().map(|d| (d.item, d.bank_id)).collect();
+        return Ok(Json(state.db.create_drill_set(daily_technique(today), &source, 1500, items).await?));
+    }
     let rating = player_rating(&state).await?;
     let (technique, seed) = match &source {
         DrillSource::Mistake { analysis_id, ply } => {
@@ -124,6 +180,7 @@ pub async fn create(UserState(state, _): UserState, Json(source): Json<DrillSour
             }
             (tag.clone(), None)
         }
+        DrillSource::Daily { .. } => unreachable!("handled above"),
         DrillSource::Weakest => {
             let tag = focus(&state, rating).await?.into_iter().next().unwrap_or_else(|| "fork".into());
             (tag, None)

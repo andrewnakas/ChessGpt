@@ -55,8 +55,20 @@ export interface Played {
   uci: string;
 }
 
-/** Play a board move (orig, dest); pawns reaching the last rank become queens. */
-export function playMove(fen: string, orig: string, dest: string): Played | null {
+export type PromotionRole = 'queen' | 'rook' | 'bishop' | 'knight';
+
+/** Is (orig, dest) a pawn reaching the last rank? */
+export function isPromotion(fen: string, orig: string, dest: string): boolean {
+  const pos = position(fen);
+  const from = parseSquare(orig);
+  const to = parseSquare(dest);
+  if (!pos || from === undefined || to === undefined) return false;
+  const rank = Math.floor(to / 8);
+  return pos.board.get(from)?.role === 'pawn' && (rank === 0 || rank === 7);
+}
+
+/** Play a board move (orig, dest); a pawn reaching the last rank becomes `promotion`. */
+export function playMove(fen: string, orig: string, dest: string, promotion: PromotionRole = 'queen'): Played | null {
   const pos = position(fen);
   if (!pos) return null;
   const from = parseSquare(orig);
@@ -64,8 +76,7 @@ export function playMove(fen: string, orig: string, dest: string): Played | null
   if (from === undefined || to === undefined) return null;
   const piece = pos.board.get(from);
   const rank = Math.floor(to / 8);
-  const promotion = piece?.role === 'pawn' && (rank === 0 || rank === 7) ? ('queen' as const) : undefined;
-  const move = { from, to, promotion };
+  const move = { from, to, promotion: piece?.role === 'pawn' && (rank === 0 || rank === 7) ? promotion : undefined };
   if (!pos.isLegal(move)) return null;
   const san = makeSan(pos, move);
   const uci = standardUci(pos, move);

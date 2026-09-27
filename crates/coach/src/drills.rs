@@ -167,10 +167,6 @@ pub async fn variant_items(
 /// A bank puzzle as a find-the-moves item.
 pub fn find_item(p: &BankPuzzle, technique: &str) -> Option<DrillItem> {
     let (fen, solution) = p.solving()?;
-    // The board promotes to a queen; an underpromotion can't be played.
-    if solution.iter().step_by(2).any(|u| u.len() == 5 && !u.ends_with('q')) {
-        return None;
-    }
     let pos = parse_fen(&fen).ok()?;
     let mut item = blank(
         DrillKind::Find,
@@ -609,20 +605,6 @@ mod tests {
         assert_eq!(item.line_san, vec!["Nc7+", "Kd7", "Nxa8"]);
         assert_eq!(item.hints, vec!["Look for a fork.", "Move your knight on d5.", "Play Nc7+."]);
         assert!(item.prompt.starts_with("White to move"), "{}", item.prompt);
-    }
-
-    #[test]
-    fn underpromotions_are_skipped() {
-        let p = BankPuzzle {
-            id: "u".into(),
-            fen: "4k3/1P6/8/8/8/8/8/4K3 b - - 0 1".into(),
-            moves: vec!["e8d7".into(), "b7b8n".into()],
-            rating: 1000,
-            themes: vec!["promotion".into()],
-        };
-        assert!(find_item(&p, "promotion").is_none());
-        let q = BankPuzzle { moves: vec!["e8d7".into(), "b7b8q".into()], ..p };
-        assert!(find_item(&q, "promotion").is_some());
     }
 
     #[test]

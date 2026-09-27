@@ -1,6 +1,6 @@
 // Typed API client. Types come from crates/api-types via `cargo xtask gen-types`.
 import { browserEngine } from '../offline/engine';
-import { needsServer, offline } from '../offline/backend';
+import { OfflineError, needsServer, offline } from '../offline/backend';
 import * as guestDrills from '../training/guestDrills';
 import type {
   AnalyseGameRequest,
@@ -240,7 +240,16 @@ function routed<S extends Record<string, Fn>>(server: S, local: Partial<{ [K in 
       const m = await mode();
       if (m === 'server' && (!guest || SERVER_ALWAYS.has(k))) return server[k](...args);
       const f = local[k as keyof S];
-      if (f) return f(...args);
+      if (f) {
+        try {
+          return await f(...args);
+        } catch (e) {
+          // The server is up; a guest just has no account.
+          if (guest && m === 'server' && e instanceof OfflineError)
+            throw new Error(e.message.replace(/needs the chessgpt server, which is offline right now\./, 'needs a free account.'));
+          throw e;
+        }
+      }
       const feature = what[k as keyof S] ?? 'This feature';
       if (guest && m === 'server') throw new Error(`${feature} needs a free account. Sign in or create one to use it.`);
       throw needsServer(feature);

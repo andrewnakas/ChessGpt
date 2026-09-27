@@ -4,7 +4,7 @@
   import { device } from '$lib/llm/device.svelte';
   import type { Meta, Provider, ProviderKind, ProviderTestResult, Settings, SyncReport } from '$lib/api/types';
 
-  const app = getContext<{ refresh: () => Promise<void>; meta: Meta | null; mode: string }>('app');
+  const app = getContext<{ refresh: () => Promise<void>; meta: Meta | null; mode: string; guest: boolean }>('app');
 
   let settings = $state<Settings | null>(null);
   let lichessToken = $state('');
@@ -241,7 +241,9 @@
 
   <section class="card pad">
     <h2>AI coach</h2>
-    {#if app.mode === 'browser'}
+    {#if app.guest}
+      <p class="muted">The coach comes with a free account. <a href="/login?create=1">Create one</a>, then turn it on here.</p>
+    {:else if app.mode === 'browser'}
       <p class="muted">The coach runs on the chessgpt server, which is offline right now. Games you analyse here are saved in this browser.</p>
     {:else if app.meta?.managed_provider}
       <p>This site provides the AI coach: <b>{app.meta.provider_label}</b>. You don't need a key.</p>

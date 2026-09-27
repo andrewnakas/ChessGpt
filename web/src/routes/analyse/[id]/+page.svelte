@@ -38,7 +38,7 @@
     uciSquares,
     whiteWin,
     type Played
-  } from '$lib/chess';
+  , type PromotionRole } from '$lib/chess';
 
   const app = getContext<{ meta: Meta | null }>('app');
   const id = $derived(page.params.id as string);
@@ -333,8 +333,8 @@
     if (target !== undefined) select(target);
   }
 
-  function onmove(orig: Key, dest: Key) {
-    const r = playMove(currentFen, orig, dest);
+  function onmove(orig: Key, dest: Key, promotion?: PromotionRole) {
+    const r = playMove(currentFen, orig, dest, promotion);
     if (!r || !game) return;
     toolShapes = [];
     if (!variation.length && game.moves[ply]?.uci === r.uci) {

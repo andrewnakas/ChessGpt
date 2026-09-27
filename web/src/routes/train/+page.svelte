@@ -6,7 +6,7 @@
   import { api } from '$lib/api/client';
   import type { Explanation, Meta, Puzzle, PuzzleQueue } from '$lib/api/types';
   import Board from '$lib/components/Board.svelte';
-  import { numberedLine, playMove, playUci, tagLabel, turn, uciSquares } from '$lib/chess';
+  import { numberedLine, playMove, playUci, tagLabel, turn, uciSquares , type PromotionRole } from '$lib/chess';
   import { coachAvailable } from '$lib/llm/device.svelte';
   import { LICHESS_THEME, nextLichessPuzzle, type LichessPuzzle } from '$lib/training/lichess';
   import { accepts, drillableTag } from '$lib/training/drills';
@@ -98,9 +98,9 @@
     }
   }
 
-  function onmove(orig: Key, dest: Key) {
+  function onmove(orig: Key, dest: Key, promotion?: PromotionRole) {
     if (!current || result) return;
-    const played = playMove(fen, orig, dest);
+    const played = playMove(fen, orig, dest, promotion);
     if (!played) return;
     // Defence puzzles: any move that holds counts.
     if (current.kind === 'mine' && current.p.accept_uci.length) {

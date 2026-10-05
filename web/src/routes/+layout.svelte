@@ -2,7 +2,7 @@
   import '../app.css';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { api, authListeners, mode, setGuest, type Account, type Mode } from '$lib/api/client';
+  import { api, authListeners, guestId, mode, setGuest, type Account, type Mode } from '$lib/api/client';
   import type { Meta } from '$lib/api/types';
   import { coachAvailable, device } from '$lib/llm/device.svelte';
   import { onMount, setContext } from 'svelte';
@@ -43,7 +43,17 @@
     app.guest = m === 'server' && s.accounts && !s.account;
     setGuest(app.guest);
     app.mode = app.guest ? 'browser' : m;
+    device.guest = app.guest ? guestId() : null;
     await loadMeta();
+    if (app.guest && meta) {
+      // Guests run the coach in this browser; the server only offers the model.
+      const dm = await fetch('/api/guest/meta').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (dm) {
+        meta = { ...meta, device_model: dm };
+        app.meta = meta;
+        void device.resume(dm);
+      }
+    }
   };
 
   function toLogin() {

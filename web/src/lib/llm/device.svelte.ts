@@ -50,6 +50,9 @@ class DeviceCoach {
   /** Requests answered in this tab (for the settings page). */
   answered = $state(0);
 
+  /** Set for guests: the relay channel is this id instead of an account. */
+  guest = $state<string | null>(null);
+
   #engine: Engine | null = null;
   #events: EventSource | null = null;
   #queue: Promise<void> = Promise.resolve();
@@ -121,7 +124,11 @@ class DeviceCoach {
 
   #connect(id: string) {
     this.#events?.close();
-    const es = new EventSource(`/api/llm/device?model=${encodeURIComponent(id)}`);
+    const es = new EventSource(
+      this.guest
+        ? `/api/guest/llm/device?model=${encodeURIComponent(id)}&guest=${encodeURIComponent(this.guest)}`
+        : `/api/llm/device?model=${encodeURIComponent(id)}`
+    );
     es.addEventListener('request', (ev) => {
       const req = JSON.parse((ev as MessageEvent).data) as { id: string; body: Record<string, unknown> };
       // One generation at a time; the server queues the rest here.
@@ -146,7 +153,8 @@ class DeviceCoach {
     } catch (e) {
       reply = { error: e instanceof Error ? e.message : String(e) };
     }
-    await fetch(`/api/llm/relay/${encodeURIComponent(id)}`, {
+    const q = this.guest ? `?guest=${encodeURIComponent(this.guest)}` : '';
+    await fetch(`${this.guest ? '/api/guest' : '/api'}/llm/relay/${encodeURIComponent(id)}${q}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(reply)

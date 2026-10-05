@@ -3,6 +3,7 @@ pub mod chat;
 pub mod drills;
 pub mod engine;
 pub mod games;
+pub mod guest;
 pub mod llm;
 pub mod progress;
 pub mod puzzles;
@@ -55,6 +56,10 @@ pub fn router(state: AppState) -> Router {
         .route("/drills/daily", get(drills::daily_public))
         .route("/drills/{id}", get(drills::get))
         .route("/drills/{id}/items/{item}/attempt", post(drills::attempt))
+        .route("/guest/meta", get(guest::meta))
+        .route("/guest/llm/device", get(guest::device))
+        .route("/guest/llm/relay/{id}", post(guest::relay_reply))
+        .route("/guest/explain", post(guest::explain))
         .route("/llm/device", get(llm::device))
         .route("/llm/relay/{id}", post(llm::relay_reply));
     Router::new()

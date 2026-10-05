@@ -207,6 +207,22 @@ export function setGuest(on: boolean) {
 }
 export const isGuest = () => guest;
 
+/** A random id for this browser's guest coach channel (not an account). */
+export function guestId(): string {
+  const key = 'chessgpt.guest-id';
+  try {
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return (guestIdMemory ??= crypto.randomUUID());
+  }
+}
+let guestIdMemory: string | undefined;
+
 /** Where calls go: the server, or this browser (offline, or a guest). */
 export async function effectiveMode(): Promise<Mode> {
   return guest ? 'browser' : mode();
@@ -276,6 +292,13 @@ export const api = routed(
     progress: offline.progress,
     puzzles: async () => ({ due: [], total: 0, due_count: 0, learned: 0 }),
     analysisMotifs: async () => [],
+    explainPly: async (id: string, ply: number) => {
+      if (!guest) throw needsServer('The coach');
+      const input = await offline.explainInput(id);
+      const e = await request<Explanation>('POST', '/guest/explain', { guest: guestId(), ply, ...input });
+      await offline.saveExplanation(id, e);
+      return e;
+    },
     drills: async () =>
       guestDrills.overview(await guestWeakTags(), guestDrills.dailyStatus(await request<DrillSet>('GET', '/drills/daily'))),
     createDrill: async (source: DrillSource) => {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { coachAvailable } from '$lib/llm/device.svelte';
+  import { coachAvailable, device } from '$lib/llm/device.svelte';
   import type { DrawShape } from '@lichess-org/chessground/draw';
   import type { Key } from '@lichess-org/chessground/types';
   import { getContext, onMount } from 'svelte';
@@ -40,7 +40,7 @@
     type Played
   , type PromotionRole } from '$lib/chess';
 
-  const app = getContext<{ meta: Meta | null }>('app');
+  const app = getContext<{ meta: Meta | null; guest: boolean }>('app');
   const id = $derived(page.params.id as string);
 
   let game = $state<GameDetail | null>(null);
@@ -392,9 +392,34 @@
     setTimeout(() => (shareMsg = null), 3000);
   }
 
+  /** Guests explain in this browser, so the page asks for the key moments
+   * itself once the analysis is done (the server does this for accounts). */
+  let autoFor = '';
+  // The in-browser coach can finish loading after this page did: switch
+  // explanations on then, unless the user has set the box themselves.
+  let explainTouched = false;
+  $effect(() => {
+    if (device.ready && !explainTouched) explain = true;
+  });
+  $effect(() => {
+    if (!app.guest || !explain || !device.ready || analysis?.status !== 'done' || autoFor === analysis.id) return;
+    autoFor = analysis.id;
+    const a = analysis;
+    void (async () => {
+      for (const p of a.key_moments) {
+        if (a.explanations.some((x) => x.ply === p) || failed[p]) continue;
+        await explainPly(p);
+      }
+    })();
+  });
+
   async function explainNow() {
     if (!analysis || !currentMove) return;
-    const p = currentMove.ply;
+    await explainPly(currentMove.ply);
+  }
+
+  async function explainPly(p: number) {
+    if (!analysis) return;
     pending.add(p);
     const { [p]: _, ...rest } = failed;
     failed = rest;
@@ -551,7 +576,7 @@
               </select>
             </label>
             <label class="check" title={coachAvailable(app.meta?.has_provider) ? '' : 'Turn on the coach in Settings'}>
-              <input type="checkbox" bind:checked={explain} disabled={!coachAvailable(app.meta?.has_provider)} /> Coach explanations
+              <input type="checkbox" bind:checked={explain} onchange={() => (explainTouched = true)} disabled={!coachAvailable(app.meta?.has_provider)} /> Coach explanations
             </label>
             <button class="primary" type="submit" disabled={starting}>
               {analysis ? 'Analyse again' : 'Analyse game'}

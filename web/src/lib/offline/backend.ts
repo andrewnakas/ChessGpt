@@ -5,6 +5,7 @@ import type {
   AnalyseGameRequest,
   AnalyseGameResponse,
   EloTier,
+  Explanation,
   GameAnalysis,
   GameDetail,
   GameSummary,
@@ -286,7 +287,22 @@ async function findAnalysis(id: string): Promise<StoredGame> {
   return g;
 }
 
+/** What the guest coach needs to explain a move of a browser-analysed game. */
+async function explainInput(analysisId: string) {
+  const g = await findAnalysis(analysisId);
+  const a = g.analysis!;
+  return { pgn: g.pgn, elo: a.elo, user_side: a.user_side, moves: a.moves };
+}
+
+async function saveExplanation(analysisId: string, e: Explanation) {
+  const g = await findAnalysis(analysisId);
+  g.analysis!.explanations = [...g.analysis!.explanations.filter((x) => x.ply !== e.ply), e];
+  await store.put(g);
+}
+
 export const offline = {
+  explainInput,
+  saveExplanation,
   meta: async () => offlineMeta,
   games: async () => (await store.all()).map((g) => g.summary).sort((a, b) => b.imported_at - a.imported_at),
   game: async (id: string): Promise<GameDetail> => {

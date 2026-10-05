@@ -15,8 +15,9 @@ use llm::{Caps, ChatRequest, Completion, LlmError, Provider, ProviderConfig, Str
 use serde_json::Value;
 use tokio::sync::{mpsc, oneshot};
 
-/// How long one request may take in the browser, queueing included.
-const DEVICE_TIMEOUT: Duration = Duration::from_secs(180);
+/// How long one request may take in the browser, queueing included. Laptop
+/// GPUs can need a few minutes for a long, schema-constrained answer.
+const DEVICE_TIMEOUT: Duration = Duration::from_secs(600);
 
 struct Device {
     conn: u64,

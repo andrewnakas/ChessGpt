@@ -217,7 +217,7 @@
     </section>
   {/if}
 
-  {#if app.mode !== 'browser' && app.meta?.device_model}
+  {#if (app.mode !== 'browser' || app.guest) && app.meta?.device_model}
     {@const dm = app.meta.device_model}
     <section class="card pad">
       <h2>Coach on this device</h2>
@@ -242,7 +242,10 @@
   <section class="card pad">
     <h2>AI coach</h2>
     {#if app.guest}
-      <p class="muted">The coach comes with a free account. <a href="/login?create=1">Create one</a>, then turn it on here.</p>
+      <p class="muted">
+        As a guest, the coach runs in this browser: turn it on above. With a <a href="/login?create=1">free account</a> you also
+        get the site's coach and chat.
+      </p>
     {:else if app.mode === 'browser'}
       <p class="muted">The coach runs on the chessgpt server, which is offline right now. Games you analyse here are saved in this browser.</p>
     {:else if app.meta?.managed_provider}

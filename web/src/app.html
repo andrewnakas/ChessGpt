@@ -6,6 +6,20 @@
     <meta name="description" content="chessgpt: open-source chess coach. Stockfish analysis explained at your level." />
     <link rel="icon" href="%sveltekit.assets%/favicon.svg" />
     <title>chessgpt</title>
+    <!-- Google Analytics, only on chessgpt.com (not on self-hosted copies). GA4's
+         enhanced measurement records the SPA's page changes from history events. -->
+    <script>
+      if (/(^|\.)chessgpt\.com$/.test(location.hostname)) {
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () { dataLayer.push(arguments); };
+        gtag('js', new Date());
+        gtag('config', 'G-MQ5FCLGQZS');
+        var s = document.createElement('script');
+        s.async = true;
+        s.src = 'https://www.googletagmanager.com/gtag/js?id=G-MQ5FCLGQZS';
+        document.head.appendChild(s);
+      }
+    </script>
     %sveltekit.head%
   </head>
   <body data-sveltekit-preload-data="hover">

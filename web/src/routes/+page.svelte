@@ -2,6 +2,7 @@
   import { goto } from '$app/navigation';
   import { api } from '$lib/api/client';
   import type { DailyStatus, GameSummary } from '$lib/api/types';
+  import DemoGame from '$lib/components/DemoGame.svelte';
   import { offline } from '$lib/offline/backend';
   import { getContext, onMount } from 'svelte';
 
@@ -168,6 +169,7 @@
       <span class="muted small">Set up any position and see Stockfish's best lines.</span>
     </a>
   </div>
+  <DemoGame />
 {:else}
   <table class="card">
     <thead>

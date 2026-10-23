@@ -110,13 +110,19 @@ impl Importers {
             s => return Err(ImportError::Http("lichess", format!("HTTP {s}"))),
         }
         let body = resp.text().await.map_err(|e| ImportError::Http("lichess", e.to_string()))?;
-        Ok(split_pgns(&body)
-            .into_iter()
+        let pgns = split_pgns(&body);
+        let games: Vec<ImportedGame> = pgns
+            .iter()
             .filter_map(|pgn| {
-                let id = pgn_tag(&pgn, "Site").and_then(|s| lichess_id(&s))?;
-                Some(ImportedGame { source: GameSource::Lichess, source_id: id, pgn })
+                let id = pgn_tag(pgn, "Site").and_then(|s| lichess_id(&s))?;
+                Some(ImportedGame { source: GameSource::Lichess, source_id: id, pgn: pgn.clone() })
             })
-            .collect())
+            .collect();
+        // Never report "0 games" when Lichess sent games we couldn't read.
+        if games.is_empty() && !pgns.is_empty() {
+            return Err(ImportError::Http("lichess", "the games came back in a format chessgpt couldn't read".into()));
+        }
+        Ok(games)
     }
 
     /// One Lichess game by id or URL.
@@ -289,23 +295,17 @@ struct ChesscomGame {
 /// `/black`, or an anchor.
 pub fn lichess_id(s: &str) -> Option<String> {
     let s = s.trim();
-    let path = s
-        .split("lichess.org/")
-        .nth(1)
-        .unwrap_or(s)
-        .split(['#', '?'])
-        .next()
-        .unwrap_or("");
-    let first = path.split('/').find(|p| !p.is_empty())?;
-    let first = if first == "game" || first == "embed" {
-        path.split('/').filter(|p| !p.is_empty()).nth(if first == "embed" { 2 } else { 2 })?
-    } else {
-        first
-    };
-    if first.len() < 8 || !first.chars().all(|c| c.is_ascii_alphanumeric()) {
+    let path = s.split("lichess.org/").nth(1).unwrap_or(s).split(['#', '?']).next().unwrap_or("");
+    // Game URLs: /{id}, /game/{id} (since Oct 2026), /game/export/{id},
+    // /embed/game/{id}, and any of these followed by /white, /black, etc.
+    let id = path
+        .split('/')
+        .filter(|p| !p.is_empty())
+        .find(|p| !matches!(*p, "game" | "export" | "embed" | "g"))?;
+    if id.len() < 8 || !id.chars().all(|c| c.is_ascii_alphanumeric()) {
         return None;
     }
-    Some(first[..8].to_string())
+    Some(id[..8].to_string())
 }
 
 /// Split a multi-game PGN on blank lines that precede a tag section.
@@ -355,12 +355,17 @@ mod tests {
         assert_eq!(lichess_id("lichess.org/abcdEFGH/black#12").as_deref(), Some("abcdEFGH"));
         assert_eq!(lichess_id("abcdEFGH").as_deref(), Some("abcdEFGH"));
         assert_eq!(lichess_id("https://lichess.org/game/export/abcdEFGH").as_deref(), Some("abcdEFGH"));
+        // Lichess moved game pages to /game/{id} in October 2026 (PGN Site tags too).
+        assert_eq!(lichess_id("https://lichess.org/game/Hhli90m0").as_deref(), Some("Hhli90m0"));
+        assert_eq!(lichess_id("https://lichess.org/game/Hhli90m0/black#33").as_deref(), Some("Hhli90m0"));
+        assert_eq!(lichess_id("https://lichess.org/embed/game/abcdEFGH").as_deref(), Some("abcdEFGH"));
         assert_eq!(lichess_id("nope"), None);
+        assert_eq!(lichess_id("https://lichess.org/game/"), None);
     }
 
     #[test]
     fn splits_multi_game_pgn() {
-        let body = "[Event \"a\"]\n[Site \"https://lichess.org/aaaaaaaa\"]\n\n1. e4 e5 1-0\n\n\n[Event \"b\"]\n[Site \"https://lichess.org/bbbbbbbb\"]\n\n1. d4 d5\n2. c4 0-1\n";
+        let body = "[Event \"a\"]\n[Site \"https://lichess.org/aaaaaaaa\"]\n\n1. e4 e5 1-0\n\n\n[Event \"b\"]\n[Site \"https://lichess.org/game/bbbbbbbb\"]\n\n1. d4 d5\n2. c4 0-1\n";
         let g = split_pgns(body);
         assert_eq!(g.len(), 2);
         assert!(g[1].contains("2. c4"));
@@ -375,7 +380,7 @@ mod tests {
             .and(header("Accept", "application/x-chess-pgn"))
             .and(query_param("max", "2"))
             .respond_with(ResponseTemplate::new(200).set_body_string(
-                "[Site \"https://lichess.org/aaaaaaaa\"]\n\n1. e4 e5 *\n\n[Site \"https://lichess.org/bbbbbbbb\"]\n\n1. d4 *\n",
+                "[Site \"https://lichess.org/aaaaaaaa\"]\n\n1. e4 e5 *\n\n[Site \"https://lichess.org/game/bbbbbbbb\"]\n\n1. d4 *\n",
             ))
             .mount(&server)
             .await;
@@ -455,5 +460,18 @@ mod tests {
             ids,
             vec!["https://www.chess.com/game/live/2", "https://www.chess.com/game/live/1", "https://www.chess.com/game/live/0"]
         );
+    }
+}
+
+#[cfg(test)]
+mod live {
+    /// Against the real Lichess API: `cargo test -p importers live -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn lichess_user_live() {
+        let user = std::env::var("LICHESS_USER").unwrap_or_else(|_| "Mr_Che3221".into());
+        let games = super::Importers::default().lichess_user(&user, 20, None).await.unwrap();
+        eprintln!("{} games, first id {:?}", games.len(), games.first().map(|g| &g.source_id));
+        assert!(!games.is_empty());
     }
 }

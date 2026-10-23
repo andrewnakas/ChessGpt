@@ -111,6 +111,16 @@ function splitPgns(text: string): string[] {
     .filter(Boolean);
 }
 
+/** The 8-character id in a Lichess game URL or PGN Site tag: /{id},
+ * /game/{id} (since October 2026), /game/export/{id}, /embed/game/{id}. */
+export function lichessId(s: string): string | null {
+  const path = (s.trim().split('lichess.org/')[1] ?? s.trim()).split(/[#?]/)[0];
+  const id = path.split('/').find((p) => p && !['game', 'export', 'embed', 'g'].includes(p));
+  return id && id.length >= 8 && /^[A-Za-z0-9]+$/.test(id) ? id.slice(0, 8) : null;
+}
+
+const pgnTag = (pgn: string, name: string) => pgn.match(new RegExp(`\\[${name} "([^"]*)"\\]`))?.[1] ?? null;
+
 async function importGames(r: ImportRequest): Promise<ImportResponse> {
   const out: ImportResponse = { games: [], duplicates: 0, errors: [] };
   const addText = async (text: string, source: GameSummary['source'], idOf?: (pgn: string) => string | null) => {
@@ -125,14 +135,28 @@ async function importGames(r: ImportRequest): Promise<ImportResponse> {
   if (r.source === 'pgn') await addText(r.pgn, 'pgn');
   else if (r.source === 'fen') throw needsServer('Saving a single position');
   else if (r.source === 'lichess_game') {
-    const id = (r.id.match(/lichess\.org\/(?:game\/export\/)?([A-Za-z0-9]{8})/)?.[1] ?? r.id.trim()).slice(0, 8);
+    const id = lichessId(r.id);
+    if (!id) throw new Error('That doesn’t look like a Lichess game link.');
     const res = await fetch(`https://lichess.org/game/export/${id}?clocks=true&evals=false`, {
       headers: { accept: 'application/x-chess-pgn' }
     });
     if (!res.ok) throw new Error(`Lichess returned ${res.status} for game ${id}`);
     await addText(await res.text(), 'lichess', () => id);
   } else if (r.source === 'lichess') {
-    throw needsServer('Importing a Lichess user’s games');
+    const user = r.username.trim();
+    const max = Math.max(1, Math.min(300, r.max ?? 20));
+    const q = new URLSearchParams({ max: String(max), clocks: 'true', opening: 'true', perfType: 'ultraBullet,bullet,blitz,rapid,classical,correspondence' });
+    const res = await fetch(`https://lichess.org/api/games/user/${encodeURIComponent(user)}?${q}`, {
+      headers: { accept: 'application/x-chess-pgn' }
+    });
+    const html = (res.headers.get('content-type') ?? '').startsWith('text/html');
+    if (res.status === 404 && !html) throw new Error(`Lichess user ${user} not found`);
+    if (!res.ok || html) throw new Error(`Lichess returned ${res.status}. Try again in a minute, or paste the PGN instead.`);
+    const body = await res.text();
+    const chunks = splitPgns(body);
+    for (const chunk of chunks) await addText(chunk, 'lichess', (pgn) => lichessId(pgnTag(pgn, 'Site') ?? ''));
+    if (chunks.length && !out.games.length && !out.duplicates && !out.errors.length)
+      out.errors.push('Lichess sent games chessgpt couldn’t read.');
   } else if (r.source === 'chesscom') {
     const user = r.username.trim().toLowerCase();
     const max = Math.max(1, Math.min(100, r.max ?? 20));

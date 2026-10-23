@@ -42,6 +42,7 @@ export interface Account {
   display_name: string;
   email: string | null;
   lichess_username: string | null;
+  chesscom_username: string | null;
   kind: string;
 }
 
@@ -49,6 +50,7 @@ export interface SessionInfo {
   accounts: boolean;
   account: Account | null;
   lichess_login: boolean;
+  chesscom_login: boolean;
 }
 
 export class HttpError extends Error {
@@ -274,7 +276,7 @@ function routed<S extends Record<string, Fn>>(server: S, local: Partial<{ [K in 
   return out as S;
 }
 
-const browserSession: SessionInfo = { accounts: false, account: null, lichess_login: false };
+const browserSession: SessionInfo = { accounts: false, account: null, lichess_login: false, chesscom_login: false };
 
 export const api = routed(
   serverApi,

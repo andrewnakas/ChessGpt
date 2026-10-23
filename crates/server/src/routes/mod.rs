@@ -80,6 +80,8 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/auth/lichess", get(auth::lichess_start))
         .route("/auth/lichess/callback", get(auth::lichess_callback))
+        .route("/auth/chesscom", get(auth::chesscom_start))
+        .route("/auth/chesscom/callback", get(auth::chesscom_callback))
         .fallback(assets::serve)
         .layer(tower_http::cors::CorsLayer::new()
             .allow_origin(tower_http::cors::Any)

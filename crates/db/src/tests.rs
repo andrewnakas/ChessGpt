@@ -300,6 +300,14 @@ async fn accounts_sessions_and_isolation() {
     let l2 = db.lichess_login("drnykterstein", "DrNykterstein", "lip_def").await.unwrap();
     assert_eq!(l1.id, l2.id);
     assert_eq!(db.for_user(&l1.id).lichess_token().await.unwrap().as_deref(), Some("lip_def"));
+
+    // Chess.com login: same account per `sub`, username kept current and used for sync.
+    let c1 = db.chesscom_login("12345", "Hikaru").await.unwrap();
+    let c2 = db.chesscom_login("12345", "hikaru").await.unwrap();
+    assert_eq!(c1.id, c2.id);
+    assert_ne!(c1.id, l1.id);
+    assert_eq!(c2.chesscom_username.as_deref(), Some("hikaru"));
+    assert_eq!(db.for_user(&c1.id).settings().await.unwrap().chesscom_username.as_deref(), Some("Hikaru"));
 }
 
 #[tokio::test]

@@ -15,7 +15,7 @@ links back to the site (`/analyse/<game>?ply=<n>`, `/board?fen=…`).
 | MCP server (Streamable HTTP, stateless, protocol `2026-07-28` and earlier) | `crates/server/src/mcp/mod.rs`, built on `rmcp` |
 | Board widget (MCP Apps, `text/html;profile=mcp-app`) | `crates/server/src/mcp/widget.rs` |
 | OAuth 2.1 authorization server | `crates/server/src/oauth.rs` |
-| Accounts (email + password, Sign in with Lichess), sessions, share links | `crates/server/src/auth.rs`, `crates/db/src/accounts.rs` |
+| Accounts (email + password, Sign in with Lichess or Chess.com), sessions, share links | `crates/server/src/auth.rs`, `crates/db/src/accounts.rs` |
 | Claude Code plugin + coaching skill | `integrations/claude-plugin/`, marketplace in `.claude-plugin/` |
 | End-to-end test (OAuth + MCP, both protocol eras) | `tools/mcp_e2e.py` |
 
@@ -58,6 +58,10 @@ CHESSGPT_PUBLIC_URL=https://chessgpt.com     # required: issuer, resource URL an
 - Serve over HTTPS (the Caddy config in `deploy/` does this).
 - Claude connects from `160.79.104.0/21`; don't firewall it.
 - Lichess sign-in needs no registration; the redirect is `https://<domain>/auth/lichess/callback`.
+- Chess.com sign-in needs an approved client from Chess.com's OAuth program
+  (https://forms.gle/RwGLuZkwDysCj2GV7). Register the redirect
+  `https://<domain>/auth/chesscom/callback`, then set `CHESSCOM_CLIENT_ID` (and
+  `CHESSCOM_CLIENT_SECRET` if they issue one). Until then the button is hidden.
 
 ## Adding it yourself
 

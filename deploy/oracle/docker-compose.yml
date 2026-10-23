@@ -25,6 +25,10 @@ services:
       CHESSGPT_DEVICE_MODEL_URL: ${CHESSGPT_DEVICE_MODEL_URL:-}
       CHESSGPT_DEVICE_MODEL_LIB: ${CHESSGPT_DEVICE_MODEL_LIB:-}
       CHESSGPT_DEVICE_MODEL_MB: ${CHESSGPT_DEVICE_MODEL_MB:-}
+      # "Sign in with Chess.com": credentials from Chess.com's OAuth program.
+      # The button stays hidden until CHESSCOM_CLIENT_ID is set.
+      CHESSCOM_CLIENT_ID: ${CHESSCOM_CLIENT_ID:-}
+      CHESSCOM_CLIENT_SECRET: ${CHESSCOM_CLIENT_SECRET:-}
       RUST_LOG: info
     volumes:
       - chessgpt-data:/data

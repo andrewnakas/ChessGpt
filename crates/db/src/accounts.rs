@@ -1,4 +1,4 @@
-//! User accounts (email + password, or Lichess), browser sessions, and
+//! User accounts (email + password, Lichess or Chess.com), browser sessions, and
 //! share links.
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
@@ -19,6 +19,7 @@ pub struct Account {
     pub display_name: String,
     pub email: Option<String>,
     pub lichess_username: Option<String>,
+    pub chesscom_username: Option<String>,
     pub kind: String,
 }
 
@@ -40,6 +41,7 @@ fn row_to_account(r: &SqliteRow) -> Result<Account> {
         display_name: r.try_get("display_name")?,
         email: r.try_get("email")?,
         lichess_username: r.try_get("lichess_username")?,
+        chesscom_username: r.try_get("chesscom_username")?,
         kind: r.try_get("kind")?,
     })
 }
@@ -171,6 +173,31 @@ impl Db {
         .execute(&self.pool)
         .await?;
         Ok(acct)
+    }
+
+    /// Find or create the account for a Chess.com user (OIDC `sub`). Their
+    /// username is also filled in for game sync if none is set yet.
+    pub async fn chesscom_login(&self, chesscom_id: &str, username: &str) -> Result<Account> {
+        let existing: Option<String> = sqlx::query_scalar("SELECT id FROM users WHERE chesscom_id = ?")
+            .bind(chesscom_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let id = match existing {
+            Some(id) => id,
+            None => self.insert_account(username, None, None, None).await?.id,
+        };
+        sqlx::query("UPDATE users SET chesscom_id = ?, chesscom_username = ? WHERE id = ?")
+            .bind(chesscom_id)
+            .bind(username)
+            .bind(&id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("UPDATE user_settings SET chesscom_username = COALESCE(NULLIF(chesscom_username, ''), ?) WHERE user_id = ?")
+            .bind(username)
+            .bind(&id)
+            .execute(&self.pool)
+            .await?;
+        self.account(&id).await
     }
 
     pub async fn create_session(&self, user_id: &str) -> Result<String> {

@@ -92,6 +92,7 @@ const serverApi = {
     request<Account>('POST', '/auth/register', { email, password, name: name ?? null }),
   login: (email: string, password: string) => request<Account>('POST', '/auth/login', { email, password }),
   logout: () => request<void>('POST', '/auth/logout'),
+  deleteAccount: () => request<void>('DELETE', '/account'),
   share: (gameId: string) => request<{ token: string; path: string }>('POST', `/games/${gameId}/share`),
   shared: (token: string) => request<GameDetail>('GET', `/share/${token}`),
   claim: (token: string) => request<{ game_id: string }>('POST', `/share/${token}/claim`),

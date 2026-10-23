@@ -200,6 +200,26 @@ impl Db {
         self.account(&id).await
     }
 
+    /// Delete an account and everything it owns. Most tables cascade from
+    /// `users`; these carry a bare `user_id` and are cleared first.
+    pub async fn delete_account(&self, user_id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for q in [
+            "DELETE FROM drill_items WHERE user_id = ?",
+            "DELETE FROM drill_sets WHERE user_id = ?",
+            "DELETE FROM puzzles WHERE user_id = ?",
+            "DELETE FROM mistake_index WHERE user_id = ?",
+        ] {
+            sqlx::query(q).bind(user_id).execute(&mut *tx).await?;
+        }
+        let n = sqlx::query("DELETE FROM users WHERE id = ? AND kind = 'account'").bind(user_id).execute(&mut *tx).await?;
+        if n.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
     pub async fn create_session(&self, user_id: &str) -> Result<String> {
         let token = random_token();
         let now = now_ms();

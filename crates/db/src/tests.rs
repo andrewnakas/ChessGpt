@@ -308,6 +308,15 @@ async fn accounts_sessions_and_isolation() {
     assert_ne!(c1.id, l1.id);
     assert_eq!(c2.chesscom_username.as_deref(), Some("hikaru"));
     assert_eq!(db.for_user(&c1.id).settings().await.unwrap().chesscom_username.as_deref(), Some("Hikaru"));
+
+    // Deleting an account removes its games and sessions; others keep theirs.
+    let s = db.create_session(&a.id).await.unwrap();
+    db.delete_account(&a.id).await.unwrap();
+    assert!(db.account(&a.id).await.is_err());
+    assert!(db.session_user(&s).await.unwrap().is_none());
+    assert!(ann.list_games(10, 0).await.unwrap().is_empty());
+    assert_eq!(bob.list_games(10, 0).await.unwrap().len(), 1);
+    assert!(db.delete_account(&a.id).await.is_err(), "already gone");
 }
 
 #[tokio::test]

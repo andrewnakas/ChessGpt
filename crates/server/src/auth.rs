@@ -128,6 +128,13 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiRes
     Ok(([(header::SET_COOKIE, session_cookie(&state, "", 0))], StatusCode::NO_CONTENT).into_response())
 }
 
+/// Delete the signed-in account and everything stored for it.
+pub async fn delete_account(UserState(state, acct): UserState) -> ApiResult<Response> {
+    let Some(acct) = acct else { return Err(AppError::bad_request("accounts are only used in hosted mode")) };
+    state.db.delete_account(&acct.id).await?;
+    Ok(([(header::SET_COOKIE, session_cookie(&state, "", 0))], StatusCode::NO_CONTENT).into_response())
+}
+
 // ------------------------------------------------------------ Lichess OAuth
 
 /// In-flight Lichess sign-ins: state -> (PKCE verifier, return path, started).

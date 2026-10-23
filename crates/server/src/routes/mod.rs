@@ -22,6 +22,7 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/register", post(auth::register))
         .route("/auth/login", post(auth::login))
         .route("/auth/logout", post(auth::logout))
+        .route("/account", axum::routing::delete(auth::delete_account))
         .route("/meta", get(settings::meta))
         .route("/engine/analyse", get(engine::analyse))
         .route("/games", get(games::list))

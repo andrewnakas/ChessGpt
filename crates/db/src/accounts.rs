@@ -1,4 +1,4 @@
-//! User accounts (email + password, or Lichess), browser sessions, and
+//! User accounts (email + password, Lichess or Chess.com), browser sessions, and
 //! share links.
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
@@ -19,6 +19,7 @@ pub struct Account {
     pub display_name: String,
     pub email: Option<String>,
     pub lichess_username: Option<String>,
+    pub chesscom_username: Option<String>,
     pub kind: String,
 }
 
@@ -40,6 +41,7 @@ fn row_to_account(r: &SqliteRow) -> Result<Account> {
         display_name: r.try_get("display_name")?,
         email: r.try_get("email")?,
         lichess_username: r.try_get("lichess_username")?,
+        chesscom_username: r.try_get("chesscom_username")?,
         kind: r.try_get("kind")?,
     })
 }
@@ -171,6 +173,51 @@ impl Db {
         .execute(&self.pool)
         .await?;
         Ok(acct)
+    }
+
+    /// Find or create the account for a Chess.com user (OIDC `sub`). Their
+    /// username is also filled in for game sync if none is set yet.
+    pub async fn chesscom_login(&self, chesscom_id: &str, username: &str) -> Result<Account> {
+        let existing: Option<String> = sqlx::query_scalar("SELECT id FROM users WHERE chesscom_id = ?")
+            .bind(chesscom_id)
+            .fetch_optional(&self.pool)
+            .await?;
+        let id = match existing {
+            Some(id) => id,
+            None => self.insert_account(username, None, None, None).await?.id,
+        };
+        sqlx::query("UPDATE users SET chesscom_id = ?, chesscom_username = ? WHERE id = ?")
+            .bind(chesscom_id)
+            .bind(username)
+            .bind(&id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("UPDATE user_settings SET chesscom_username = COALESCE(NULLIF(chesscom_username, ''), ?) WHERE user_id = ?")
+            .bind(username)
+            .bind(&id)
+            .execute(&self.pool)
+            .await?;
+        self.account(&id).await
+    }
+
+    /// Delete an account and everything it owns. Most tables cascade from
+    /// `users`; these carry a bare `user_id` and are cleared first.
+    pub async fn delete_account(&self, user_id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        for q in [
+            "DELETE FROM drill_items WHERE user_id = ?",
+            "DELETE FROM drill_sets WHERE user_id = ?",
+            "DELETE FROM puzzles WHERE user_id = ?",
+            "DELETE FROM mistake_index WHERE user_id = ?",
+        ] {
+            sqlx::query(q).bind(user_id).execute(&mut *tx).await?;
+        }
+        let n = sqlx::query("DELETE FROM users WHERE id = ? AND kind = 'account'").bind(user_id).execute(&mut *tx).await?;
+        if n.rows_affected() == 0 {
+            return Err(DbError::NotFound);
+        }
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn create_session(&self, user_id: &str) -> Result<String> {

@@ -1,4 +1,5 @@
-//! Accounts in hosted mode: email + password or "Sign in with Lichess",
+//! Accounts in hosted mode: email + password, "Sign in with Lichess" or
+//! "Sign in with Chess.com",
 //! browser sessions in an HttpOnly cookie. Local mode has a single user and
 //! no login.
 
@@ -68,6 +69,7 @@ pub struct Session {
     accounts: bool,
     account: Option<Account>,
     lichess_login: bool,
+    chesscom_login: bool,
 }
 
 pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> ApiResult<Json<Session>> {
@@ -75,7 +77,12 @@ pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> ApiRe
         (true, Some(t)) => state.db.session_user(&t).await?,
         _ => None,
     };
-    Ok(Json(Session { accounts: state.accounts_enabled(), account, lichess_login: state.accounts_enabled() }))
+    Ok(Json(Session {
+        accounts: state.accounts_enabled(),
+        account,
+        lichess_login: state.accounts_enabled(),
+        chesscom_login: state.accounts_enabled() && state.config.chesscom_client_id.is_some(),
+    }))
 }
 
 #[derive(Deserialize)]
@@ -118,6 +125,13 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> ApiRes
     if let Some(t) = cookie_value(&headers) {
         state.db.delete_session(&t).await?;
     }
+    Ok(([(header::SET_COOKIE, session_cookie(&state, "", 0))], StatusCode::NO_CONTENT).into_response())
+}
+
+/// Delete the signed-in account and everything stored for it.
+pub async fn delete_account(UserState(state, acct): UserState) -> ApiResult<Response> {
+    let Some(acct) = acct else { return Err(AppError::bad_request("accounts are only used in hosted mode")) };
+    state.db.delete_account(&acct.id).await?;
     Ok(([(header::SET_COOKIE, session_cookie(&state, "", 0))], StatusCode::NO_CONTENT).into_response())
 }
 
@@ -240,6 +254,99 @@ pub async fn lichess_callback(
     }
 }
 
+// ---------------------------------------------------------- Chess.com OAuth
+
+// Chess.com's OpenID Connect server (https://oauth.chess.com/.well-known/openid-configuration).
+// Client credentials come from Chess.com's OAuth application program.
+const CHESSCOM_ISSUER: &str = "https://oauth.chess.com";
+
+pub async fn chesscom_start(State(state): State<AppState>, headers: HeaderMap, Query(q): Query<LichessStart>) -> Response {
+    let Some(client_id) = state.config.chesscom_client_id.clone() else {
+        return Redirect::to(&format!("/login?error={}", enc("Chess.com sign-in is not set up on this server"))).into_response();
+    };
+    let base = base_url(&state, &headers);
+    let verifier = random_token();
+    let st = random_token();
+    state.pending.put(&st, &verifier, &safe_return(q.ret.as_deref()));
+    // The state doubles as the OIDC nonce: both are single use and random.
+    let url = format!(
+        "{CHESSCOM_ISSUER}/authorize?response_type=code&client_id={}&redirect_uri={}&scope=openid%20profile&code_challenge_method=S256&code_challenge={}&state={st}&nonce={st}",
+        enc(&client_id),
+        enc(&format!("{base}/auth/chesscom/callback")),
+        pkce_challenge(&verifier),
+    );
+    Redirect::to(&url).into_response()
+}
+
+pub async fn chesscom_callback(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<LichessCallback>,
+) -> Response {
+    let fail = |m: &str| Redirect::to(&format!("/login?error={}", enc(m))).into_response();
+    let Some(client_id) = state.config.chesscom_client_id.clone() else {
+        return fail("Chess.com sign-in is not set up on this server");
+    };
+    if let Some(e) = q.error {
+        return fail(&format!("Chess.com sign-in was cancelled ({e})"));
+    }
+    let (Some(code), Some(st)) = (q.code, q.state) else { return fail("missing code") };
+    let Some((verifier, ret)) = state.pending.take(&st) else { return fail("sign-in expired, try again") };
+    let base = base_url(&state, &headers);
+    let redirect_uri = format!("{base}/auth/chesscom/callback");
+    let mut form = vec![
+        ("grant_type", "authorization_code"),
+        ("code", code.as_str()),
+        ("code_verifier", verifier.as_str()),
+        ("redirect_uri", redirect_uri.as_str()),
+        ("client_id", client_id.as_str()),
+    ];
+    if let Some(secret) = &state.config.chesscom_client_secret {
+        form.push(("client_secret", secret.as_str()));
+    }
+    let tok: serde_json::Value = match reqwest::Client::new()
+        .post(format!("{CHESSCOM_ISSUER}/token"))
+        .header(header::USER_AGENT, concat!("chessgpt/", env!("CARGO_PKG_VERSION"), " (+https://chessgpt.com)"))
+        .form(&form)
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
+        Ok(r) => return fail(&format!("Chess.com refused the sign-in (HTTP {})", r.status())),
+        Err(e) => return fail(&format!("could not reach Chess.com: {e}")),
+    };
+    // The id_token came straight from the token endpoint over TLS, so its
+    // claims are checked but its signature need not be (OIDC Core 3.1.3.7).
+    let claims = tok["id_token"].as_str().and_then(|t| chesscom_claims(t, &client_id, &st, db::now_ms() / 1000));
+    let Some((sub, username)) = claims else { return fail("could not read your Chess.com account") };
+    let account = match state.db.chesscom_login(&sub, &username).await {
+        Ok(a) => a,
+        Err(e) => return fail(&e.to_string()),
+    };
+    match start_session(&state, &account).await {
+        Ok(cookie) => ([(header::SET_COOKIE, cookie)], Redirect::to(&ret)).into_response(),
+        Err(e) => fail(&e.1),
+    }
+}
+
+/// `(sub, preferred_username)` from a Chess.com id_token, if it is for us,
+/// unexpired and carries our nonce.
+fn chesscom_claims(id_token: &str, client_id: &str, nonce: &str, now_secs: i64) -> Option<(String, String)> {
+    use base64::Engine;
+    let payload = id_token.split('.').nth(1)?;
+    let c: serde_json::Value =
+        serde_json::from_slice(&base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')).ok()?).ok()?;
+    let aud_ok = match &c["aud"] {
+        serde_json::Value::String(a) => a == client_id,
+        serde_json::Value::Array(a) => a.iter().any(|v| v == client_id),
+        _ => false,
+    };
+    let ok = c["iss"] == CHESSCOM_ISSUER && aud_ok && c["exp"].as_i64()? > now_secs && c["nonce"] == nonce;
+    let sub = c["sub"].as_str().filter(|s| !s.is_empty())?;
+    let username = c["preferred_username"].as_str().filter(|s| !s.is_empty())?;
+    ok.then(|| (sub.to_string(), username.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,6 +357,30 @@ mod tests {
             pkce_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
             "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
         );
+    }
+
+    #[test]
+    fn chesscom_id_token_claims_are_checked() {
+        use base64::Engine;
+        let tok = |c: serde_json::Value| {
+            let b = |v: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(v);
+            format!("{}.{}.sig", b(br#"{"alg":"RS256"}"#), b(c.to_string().as_bytes()))
+        };
+        let good = serde_json::json!({
+            "iss": "https://oauth.chess.com", "aud": "cid", "sub": "42", "exp": 2000,
+            "nonce": "n1", "preferred_username": "MagnusCarlsen"
+        });
+        assert_eq!(chesscom_claims(&tok(good.clone()), "cid", "n1", 1000), Some(("42".into(), "MagnusCarlsen".into())));
+        let mut arr = good.clone();
+        arr["aud"] = serde_json::json!(["other", "cid"]);
+        assert!(chesscom_claims(&tok(arr), "cid", "n1", 1000).is_some());
+        assert!(chesscom_claims(&tok(good.clone()), "other", "n1", 1000).is_none(), "wrong audience");
+        assert!(chesscom_claims(&tok(good.clone()), "cid", "n2", 1000).is_none(), "wrong nonce");
+        assert!(chesscom_claims(&tok(good.clone()), "cid", "n1", 3000).is_none(), "expired");
+        let mut iss = good;
+        iss["iss"] = "https://evil.example".into();
+        assert!(chesscom_claims(&tok(iss), "cid", "n1", 1000).is_none(), "wrong issuer");
+        assert!(chesscom_claims("garbage", "cid", "n1", 1000).is_none());
     }
 
     #[test]

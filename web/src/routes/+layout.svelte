@@ -23,7 +23,7 @@
   setContext('app', app);
 
   // Pages anyone may open without signing in (hosted mode).
-  const PUBLIC = ['/login', '/share/', '/about', '/connect', '/oauth/'];
+  const PUBLIC = ['/login', '/share/', '/about', '/connect', '/oauth/', '/privacy', '/terms'];
   const isPublic = (p: string) => PUBLIC.some((x) => p === x || p.startsWith(x));
 
   async function loadMeta() {
@@ -136,6 +136,7 @@
 <footer class="muted">
   <a href="https://github.com/andrewnakas/ChessGpt">chessgpt</a> is open source (AGPL-3.0). Analysis by
   <a href="https://stockfishchess.org">Stockfish</a> (GPL-3.0). <a href="/about">About, source and licenses</a>.
+  <a href="/privacy">Privacy</a>. <a href="/terms">Terms</a>.
 </footer>
 
 <style>

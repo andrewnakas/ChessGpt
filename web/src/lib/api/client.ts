@@ -42,6 +42,7 @@ export interface Account {
   display_name: string;
   email: string | null;
   lichess_username: string | null;
+  chesscom_username: string | null;
   kind: string;
 }
 
@@ -49,6 +50,7 @@ export interface SessionInfo {
   accounts: boolean;
   account: Account | null;
   lichess_login: boolean;
+  chesscom_login: boolean;
 }
 
 export class HttpError extends Error {
@@ -90,6 +92,7 @@ const serverApi = {
     request<Account>('POST', '/auth/register', { email, password, name: name ?? null }),
   login: (email: string, password: string) => request<Account>('POST', '/auth/login', { email, password }),
   logout: () => request<void>('POST', '/auth/logout'),
+  deleteAccount: () => request<void>('DELETE', '/account'),
   share: (gameId: string) => request<{ token: string; path: string }>('POST', `/games/${gameId}/share`),
   shared: (token: string) => request<GameDetail>('GET', `/share/${token}`),
   claim: (token: string) => request<{ game_id: string }>('POST', `/share/${token}/claim`),
@@ -274,7 +277,7 @@ function routed<S extends Record<string, Fn>>(server: S, local: Partial<{ [K in 
   return out as S;
 }
 
-const browserSession: SessionInfo = { accounts: false, account: null, lichess_login: false };
+const browserSession: SessionInfo = { accounts: false, account: null, lichess_login: false, chesscom_login: false };
 
 export const api = routed(
   serverApi,

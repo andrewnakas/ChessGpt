@@ -4,7 +4,13 @@
   import { device } from '$lib/llm/device.svelte';
   import type { Meta, Provider, ProviderKind, ProviderTestResult, Settings, SyncReport } from '$lib/api/types';
 
-  const app = getContext<{ refresh: () => Promise<void>; meta: Meta | null; mode: string; guest: boolean }>('app');
+  const app = getContext<{
+    refresh: () => Promise<void>;
+    meta: Meta | null;
+    mode: string;
+    guest: boolean;
+    account: { display_name: string } | null;
+  }>('app');
 
   let settings = $state<Settings | null>(null);
   let lichessToken = $state('');
@@ -96,6 +102,18 @@
     await api.disconnectChesscom();
     if (settings) settings.chesscom_username = null;
     syncMsg = null;
+  }
+
+  let confirmDelete = $state(false);
+  let deleteError = $state<string | null>(null);
+  async function deleteAccount() {
+    deleteError = null;
+    try {
+      await api.deleteAccount();
+      location.href = '/';
+    } catch (e) {
+      deleteError = (e as Error).message;
+    }
   }
 
   async function clearToken() {
@@ -207,7 +225,7 @@
           <button class="primary" type="submit" disabled={linking || !chesscomInput.trim()}>{linking ? 'Linking…' : 'Link account'}</button>
         </form>
         <p class="muted small">
-          Chess.com has no sign-in for other sites, but your games are public, so your username is all chessgpt needs.
+          Your Chess.com games are public, so your username is all chessgpt needs.
           It imports your recent games, marks your side, and keeps them in sync. Your Lichess games sync the same way
           when your Lichess username is set.
         </p>
@@ -305,6 +323,23 @@
     </form>
     {/if}
   </section>
+
+  {#if app.account}
+    <section class="card pad">
+      <h2>Delete account</h2>
+      <p class="muted small">
+        Permanently deletes your account, games, analyses, drills, chats, saved API keys and connections from the
+        chessgpt server. This cannot be undone. See the <a href="/privacy">privacy policy</a>.
+      </p>
+      {#if confirmDelete}
+        <button class="danger" onclick={deleteAccount}>Yes, delete everything</button>
+        <button class="ghost small" onclick={() => (confirmDelete = false)}>Cancel</button>
+      {:else}
+        <button class="ghost small danger" onclick={() => (confirmDelete = true)}>Delete my account</button>
+      {/if}
+      {#if deleteError}<p class="error small">{deleteError}</p>{/if}
+    </section>
+  {/if}
 </div>
 
 <style>

@@ -15,6 +15,10 @@ pub struct Config {
     pub dev: bool,
     /// Coach model offered to browsers with WebGPU; None turns that off.
     pub device_model: Option<api_types::DeviceModel>,
+    /// "Sign in with Chess.com" credentials from Chess.com's OAuth program;
+    /// the button stays hidden until a client id is set.
+    pub chesscom_client_id: Option<String>,
+    pub chesscom_client_secret: Option<String>,
 }
 
 /// Default in-browser coach model (WebLLM's prebuilt list, Apache-2.0).
@@ -85,6 +89,8 @@ impl Config {
             public_url: env("CHESSGPT_PUBLIC_URL"),
             dev: env("CHESSGPT_DEV").is_some_and(|v| v != "0"),
             device_model: device_model(),
+            chesscom_client_id: env("CHESSCOM_CLIENT_ID"),
+            chesscom_client_secret: env("CHESSCOM_CLIENT_SECRET"),
             mode,
         }
     }
